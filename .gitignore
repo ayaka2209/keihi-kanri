@@ -1,0 +1,29 @@
+# 秘密情報・環境設定（絶対にコミットしない）
+.env
+*.env
+!.env.example
+
+# データベース・データファイル
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Claude Code 個人ローカル設定
+.claude/settings.local.json
+
+# OS / エディタ
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# ログ
+*.log

@@ -1,0 +1,30 @@
+# PostgreSQL をローカルで起動するための設定（Phase 0）
+#
+#   起動:  docker compose up -d
+#   停止:  docker compose down
+#   中身を見る: docker compose exec db psql -U keihi -d keihi
+#
+# データは名前付きボリューム pgdata に残るので、down してもデータは消えません。
+# 完全に消したいときは:  docker compose down -v
+
+services:
+  db:
+    image: postgres:16
+    container_name: keihi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keihi
+      POSTGRES_PASSWORD: keihi_dev_password
+      POSTGRES_DB: keihi
+    ports:
+      - "5432:5432"          # ホストの5432 → コンテナの5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keihi -d keihi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

@@ -1,0 +1,171 @@
+"""
+API層 = FastAPIアプリ本体。
+
+役割は「リクエストを受けて、crud(リポジトリ層)を呼んで、結果を返す」だけ。
+DBの細かい操作はここには書かない（層を分けるのが大規模化の作法）。
+
+起動:
+    cd backend
+    uvicorn app.main:app --reload --port 8765
+
+自動生成APIドキュメント:  http://localhost:8765/docs
+画面（既存フロント）:      http://localhost:8765/
+"""
+
+import csv
+import io
+import datetime
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Depends, HTTPException, Response
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+
+from .database import Base, engine, get_db
+from . import crud, models, schemas
+
+# フロントエンド（静的ファイル）の場所： backend/app/ から見た ../../static
+STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 起動時：テーブルを作成し、初期データを投入する
+    # （Phase 2 で Alembic マイグレーションに置き換える予定）
+    Base.metadata.create_all(bind=engine)
+    db = next(get_db())
+    try:
+        crud.ensure_seed_data(db)
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title="経費管理API", version="2.0", lifespan=lifespan)
+
+
+def current_user_id(db: Session = Depends(get_db)) -> int:
+    """今ログイン中のユーザーID。今は1人なので先頭ユーザーを返す。
+    Phase 3 でここを「トークンから本人を特定する」処理に差し替える。"""
+    uid = db.scalar(select(models.User.id).limit(1))
+    if uid is None:
+        raise HTTPException(500, "ユーザーが初期化されていません")
+    return uid
+
+
+# ---- メタ情報 -------------------------------------------------------------
+@app.get("/api/meta")
+def meta():
+    return {"payments": crud.PAYMENT_METHODS, "today": datetime.date.today().isoformat()}
+
+
+# ---- 経費 -----------------------------------------------------------------
+@app.get("/api/expenses", response_model=list[schemas.ExpenseOut])
+def get_expenses(
+    year: str | None = None,
+    month: int | None = None,
+    category: str | None = None,
+    keyword: str | None = None,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.list_expenses(db, uid, year, month, category, keyword)
+
+
+@app.post("/api/expenses", response_model=schemas.ExpenseOut)
+def post_expense(
+    data: schemas.ExpenseCreate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.create_expense(db, uid, data)
+
+
+@app.put("/api/expenses/{expense_id}", response_model=schemas.ExpenseOut)
+def put_expense(
+    expense_id: int,
+    data: schemas.ExpenseUpdate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    obj = crud.update_expense(db, uid, expense_id, data)
+    if obj is None:
+        raise HTTPException(404, "対象の経費が見つかりません")
+    return obj
+
+
+@app.delete("/api/expenses/{expense_id}")
+def remove_expense(
+    expense_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    if not crud.delete_expense(db, uid, expense_id):
+        raise HTTPException(404, "対象の経費が見つかりません")
+    return {"deleted": expense_id}
+
+
+# ---- 集計 -----------------------------------------------------------------
+@app.get("/api/summary", response_model=schemas.Summary)
+def summary(
+    year: str | None = None,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    year = year or str(datetime.date.today().year)
+    return crud.get_summary(db, uid, year)
+
+
+@app.get("/api/years")
+def years(db: Session = Depends(get_db), uid: int = Depends(current_user_id)):
+    return crud.get_years(db, uid)
+
+
+# ---- 勘定科目 -------------------------------------------------------------
+@app.get("/api/categories")
+def categories(db: Session = Depends(get_db), uid: int = Depends(current_user_id)):
+    return crud.list_categories(db, uid)
+
+
+@app.post("/api/categories")
+def post_category(
+    data: schemas.CategoryCreate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    crud.add_category(db, uid, data.name)
+    return {"name": data.name}
+
+
+# ---- CSV出力（確定申告用） ------------------------------------------------
+@app.get("/api/export.csv")
+def export_csv(
+    year: str | None = None,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    year = year or str(datetime.date.today().year)
+    rows = crud.list_expenses(db, uid, year=year)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["日付", "勘定科目", "金額", "支払先", "支払方法", "摘要", "領収書"])
+    for r in sorted(rows, key=lambda x: x.date):
+        writer.writerow([
+            r.date.isoformat(), r.category, r.amount,
+            r.payee, r.payment, r.memo, "有" if r.receipt else "",
+        ])
+    # Excelで文字化けしないようBOM付きUTF-8
+    body = ("﻿" + buf.getvalue()).encode("utf-8")
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="keihi_{year}.csv"'},
+    )
+
+
+# ---- フロントエンド（静的ファイル） ---------------------------------------
+# 注意: API のルートをすべて定義した「後」にマウントすること。
+# こうしないと "/" がすべてのリクエストを横取りしてしまう。
+app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
