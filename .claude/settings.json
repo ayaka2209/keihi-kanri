@@ -1,0 +1,65 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)",
+      "Bash(docker compose down -v:*)",
+      "Bash(docker-compose down -v:*)",
+      "Bash(cat .env:*)",
+      "Bash(cat backend/.env:*)",
+      "Read(./.env)",
+      "Read(./backend/.env)",
+      "Edit(./.env)",
+      "Edit(./backend/.env)",
+      "Write(./.env)",
+      "Write(./backend/.env)"
+    ],
+    "allow": [
+      "Bash(pytest:*)",
+      "Bash(cd backend && pytest:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(ruff check:*)",
+      "Bash(ruff format:*)",
+      "Bash(mypy:*)",
+      "Bash(uvicorn:*)",
+      "Bash(docker compose up:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)",
+      "Bash(git add:*)",
+      "Bash(git status)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git commit:*)",
+      "Bash(curl -s http://localhost:8765:*)",
+      "Bash(bats:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/posttooluse-bash.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
