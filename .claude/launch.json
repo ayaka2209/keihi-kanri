@@ -4,7 +4,7 @@
     {
       "name": "keihi",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["app.py"],
+      "runtimeArgs": ["legacy/app.py"],
       "port": 8765
     }
   ]
