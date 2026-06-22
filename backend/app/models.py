@@ -10,12 +10,12 @@ ORMモデル = Pythonのクラスがそのままテーブルになる。
 import datetime
 
 from sqlalchemy import (
-    Integer,
-    String,
     Boolean,
     Date,
     DateTime,
     ForeignKey,
+    Integer,
+    String,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -47,6 +47,32 @@ class Category(Base):
     user: Mapped["User"] = relationship(back_populates="categories")
 
 
+class FixedAsset(Base):
+    """固定資産（車・PC・建物など）。毎年の減価償却費は保存せず、
+    取得情報からその都度計算する（→ app/depreciation.py）。"""
+
+    __tablename__ = "fixed_assets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)  # 資産名
+    acquisition_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)  # 事業供用開始日
+    acquisition_cost: Mapped[int] = mapped_column(Integer, nullable=False)  # 取得価額（円）
+    useful_life_years: Mapped[int] = mapped_column(Integer, nullable=False)  # 耐用年数
+    business_ratio: Mapped[int] = mapped_column(Integer, default=100)  # 事業按分率(0〜100)
+    depreciation_method: Mapped[str] = mapped_column(
+        String(30),
+        default="straight_line",  # 現状は定額法のみ。将来 declining_balance 用
+    )
+    disposal_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)  # 売却・除却日
+    memo: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user: Mapped["User"] = relationship()
+
+
 class Expense(Base):
     __tablename__ = "expenses"
 
@@ -54,11 +80,11 @@ class Expense(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     date: Mapped[datetime.date] = mapped_column(Date, nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False)  # 勘定科目
-    amount: Mapped[int] = mapped_column(Integer, nullable=False)        # 金額（円・税込）
-    payee: Mapped[str] = mapped_column(String(200), default="")         # 支払先
-    payment: Mapped[str] = mapped_column(String(50), default="")        # 支払方法
-    memo: Mapped[str] = mapped_column(String(500), default="")          # 摘要
-    receipt: Mapped[bool] = mapped_column(Boolean, default=False)       # 領収書有無
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # 金額（円・税込）
+    payee: Mapped[str] = mapped_column(String(200), default="")  # 支払先
+    payment: Mapped[str] = mapped_column(String(50), default="")  # 支払方法
+    memo: Mapped[str] = mapped_column(String(500), default="")  # 摘要
+    receipt: Mapped[bool] = mapped_column(Boolean, default=False)  # 領収書有無
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -28,6 +28,7 @@ $$(".tab").forEach((btn) => {
     $("#tab-" + btn.dataset.tab).classList.add("active");
     if (btn.dataset.tab === "list") loadList();
     if (btn.dataset.tab === "summary") loadSummary();
+    if (btn.dataset.tab === "assets") loadAssets();
   });
 });
 
@@ -67,6 +68,7 @@ async function fillYearSelects() {
   const optHtml = years.map((y) => `<option>${y}</option>`).join("");
   $("#filter-year").innerHTML = optHtml;
   $("#summary-year").innerHTML = optHtml;
+  $("#dep-year").innerHTML = optHtml;
   // 月セレクト
   $("#filter-month").innerHTML =
     '<option value="">月：すべて</option>' +
@@ -234,6 +236,17 @@ async function loadSummary() {
   $("#sum-count").textContent = s.count;
   $("#export-btn").href = "/api/export.csv?year=" + year;
 
+  // 減価償却費の注記（科目別・年間合計には含むが、月別推移には含めない）
+  const note = $("#dep-note");
+  if (s.depreciation_total) {
+    note.textContent =
+      `※ 年間合計と科目別集計には固定資産の減価償却費 ${yen(s.depreciation_total)}円（事業分）を` +
+      `含んでいます。月別推移は実際の支出のみのため、合計とは一致しません。`;
+    note.hidden = false;
+  } else {
+    note.hidden = true;
+  }
+
   // 科目別
   const tbody = $("#cat-table tbody");
   tbody.innerHTML = "";
@@ -278,6 +291,139 @@ $("#cat-form").addEventListener("submit", async (e) => {
   fillCategorySelects();
   showMsg("#cat-msg", `「${name}」を追加しました`);
 });
+
+// ---- 固定資産 -------------------------------------------------------------
+async function loadAssets() {
+  const rows = await api("/api/assets");
+  const tbody = $("#asset-table tbody");
+  tbody.innerHTML = "";
+  rows.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${esc(r.name)}</td>
+      <td>${r.acquisition_date}</td>
+      <td class="num">${yen(r.acquisition_cost)}</td>
+      <td class="num">${r.useful_life_years}年</td>
+      <td class="num">${r.business_ratio}%</td>
+      <td>${r.disposal_date || ""}</td>
+      <td class="num">
+        <button class="row-btn edit">編集</button>
+        <button class="row-btn del">削除</button>
+      </td>`;
+    tr.querySelector(".edit").addEventListener("click", () => startEditAsset(r));
+    tr.querySelector(".del").addEventListener("click", () => removeAsset(r));
+    tbody.appendChild(tr);
+  });
+  $("#asset-empty").hidden = rows.length > 0;
+
+  // 減価償却の明細も更新
+  await loadDepreciation();
+}
+
+$("#asset-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = $("#asset-edit-id").value;
+  const data = {
+    name: $("#a-name").value.trim(),
+    acquisition_cost: Number($("#a-cost").value),
+    acquisition_date: $("#a-acq-date").value,
+    useful_life_years: Number($("#a-life").value),
+    business_ratio: Number($("#a-ratio").value || 100),
+    disposal_date: $("#a-disposal").value || null,
+    memo: $("#a-memo").value.trim(),
+  };
+  if (!data.name || !data.acquisition_date || !data.acquisition_cost || !data.useful_life_years) {
+    return;
+  }
+
+  try {
+    if (id) {
+      await api(`/api/assets/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      showMsg("#asset-msg", "更新しました");
+    } else {
+      await api("/api/assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      showMsg("#asset-msg", `登録しました（${esc(data.name)}）`);
+    }
+    resetAssetForm();
+    await fillYearSelects();
+    await loadAssets();
+  } catch (err) {
+    showMsg("#asset-msg", err.message, true);
+  }
+});
+
+$("#asset-cancel-edit").addEventListener("click", resetAssetForm);
+
+function resetAssetForm() {
+  $("#asset-edit-id").value = "";
+  $("#asset-form").reset();
+  $("#a-ratio").value = "100";
+  $("#asset-form-title").textContent = "固定資産を登録";
+  $("#asset-submit-btn").textContent = "登録する";
+  $("#asset-cancel-edit").hidden = true;
+}
+
+function startEditAsset(row) {
+  $("#asset-edit-id").value = row.id;
+  $("#a-name").value = row.name;
+  $("#a-cost").value = row.acquisition_cost;
+  $("#a-acq-date").value = row.acquisition_date;
+  $("#a-life").value = row.useful_life_years;
+  $("#a-ratio").value = row.business_ratio;
+  $("#a-disposal").value = row.disposal_date || "";
+  $("#a-memo").value = row.memo || "";
+  $("#asset-form-title").textContent = `固定資産を編集（#${row.id}）`;
+  $("#asset-submit-btn").textContent = "更新する";
+  $("#asset-cancel-edit").hidden = false;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function removeAsset(row) {
+  if (!confirm(`この固定資産を削除しますか？\n${row.name}（${yen(row.acquisition_cost)}円）`)) return;
+  await api(`/api/assets/${row.id}`, { method: "DELETE" });
+  await fillYearSelects();
+  loadAssets();
+}
+
+// ---- 減価償却の明細 -------------------------------------------------------
+async function loadDepreciation() {
+  const year = $("#dep-year").value;
+  const d = await api("/api/depreciation?year=" + year);
+
+  $("#dep-total").textContent = yen(d.total_business_amount);
+  $("#dep-export-btn").href = "/api/assets_export.csv?year=" + year;
+
+  const tbody = $("#dep-table tbody");
+  tbody.innerHTML = "";
+  d.details.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${esc(r.name)}</td>
+      <td class="num">${yen(r.acquisition_cost)}</td>
+      <td class="num">${r.useful_life_years}年</td>
+      <td class="num">${r.rate.toFixed(3)}</td>
+      <td class="num">${r.business_ratio}%</td>
+      <td class="num">${r.months}か月</td>
+      <td class="num">${yen(r.opening_book_value)}</td>
+      <td class="num">${yen(r.depreciation_amount)}</td>
+      <td class="num">${yen(r.business_amount)}</td>
+      <td class="num">${yen(r.closing_book_value)}</td>`;
+    tbody.appendChild(tr);
+  });
+  if (d.details.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty">この年に償却する固定資産はありません</td></tr>';
+  }
+}
+
+$("#dep-year").addEventListener("change", loadDepreciation);
 
 // ---- 起動 -----------------------------------------------------------------
 init();

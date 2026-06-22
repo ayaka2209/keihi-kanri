@@ -13,6 +13,7 @@
       <button class="tab active" data-tab="input">経費を入力</button>
       <button class="tab" data-tab="list">一覧</button>
       <button class="tab" data-tab="summary">集計・確定申告</button>
+      <button class="tab" data-tab="assets">固定資産</button>
     </nav>
   </header>
 
@@ -97,6 +98,8 @@
         </div>
       </div>
 
+      <p class="hint" id="dep-note" hidden></p>
+
       <h3>科目別集計（確定申告書の経費欄に対応）</h3>
       <div class="table-wrap">
         <table id="cat-table">
@@ -114,6 +117,87 @@
         <button type="submit" class="ghost">追加</button>
         <span id="cat-msg" class="msg"></span>
       </form>
+    </section>
+
+    <!-- 固定資産タブ -->
+    <section id="tab-assets" class="tab-panel">
+      <h2 id="asset-form-title">固定資産を登録</h2>
+      <form id="asset-form">
+        <input type="hidden" id="asset-edit-id" />
+        <div class="grid">
+          <label>資産名<span class="req">*</span>
+            <input type="text" id="a-name" required placeholder="例: 業務用車両（プリウス）" />
+          </label>
+          <label>取得価額（円・税込）<span class="req">*</span>
+            <input type="number" id="a-cost" min="1" step="1" required placeholder="例: 2400000" />
+          </label>
+          <label>取得日（事業供用開始日）<span class="req">*</span>
+            <input type="date" id="a-acq-date" required />
+          </label>
+          <label>耐用年数（年）<span class="req">*</span>
+            <input type="number" id="a-life" min="1" max="100" step="1" required
+                   list="life-list" placeholder="例: 普通車6 / 軽4" />
+            <datalist id="life-list">
+              <option value="4">軽自動車（新車）</option>
+              <option value="6">普通自動車（新車）</option>
+            </datalist>
+          </label>
+          <label>事業按分率（%）
+            <input type="number" id="a-ratio" min="0" max="100" step="1" value="100" />
+          </label>
+          <label>売却・除却日（手放したら入力）
+            <input type="date" id="a-disposal" />
+          </label>
+        </div>
+        <label class="full">メモ
+          <input type="text" id="a-memo" placeholder="例: 7月から事業用に使用開始" />
+        </label>
+        <div class="actions">
+          <button type="submit" class="primary" id="asset-submit-btn">登録する</button>
+          <button type="button" id="asset-cancel-edit" class="ghost" hidden>編集をやめる</button>
+          <span id="asset-msg" class="msg"></span>
+        </div>
+      </form>
+      <p class="hint">
+        車・PC・建物などは「経費」ではなく固定資産として登録します。毎年の減価償却費（定額法）は
+        取得情報から自動計算され、「集計・確定申告」タブの科目別集計（減価償却費）と年間合計に
+        反映されます。
+      </p>
+
+      <h3>登録済みの固定資産</h3>
+      <div class="table-wrap">
+        <table id="asset-table">
+          <thead>
+            <tr>
+              <th>資産名</th><th>取得日</th><th class="num">取得価額</th>
+              <th class="num">耐用年数</th><th class="num">事業割合</th>
+              <th>除却日</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty" id="asset-empty" hidden>固定資産はまだ登録されていません。</p>
+
+      <h3>減価償却費の計算（確定申告「減価償却費の計算」欄に対応）</h3>
+      <div class="filters">
+        <select id="dep-year"></select>
+        <a id="dep-export-btn" class="btn primary" href="#">減価償却CSVダウンロード</a>
+      </div>
+      <div class="list-total">本年分の減価償却費（事業分）合計：<strong id="dep-total">0</strong> 円</div>
+      <div class="table-wrap">
+        <table id="dep-table">
+          <thead>
+            <tr>
+              <th>資産名</th><th class="num">取得価額</th><th class="num">耐用年数</th>
+              <th class="num">償却率</th><th class="num">事業割合</th><th class="num">本年月数</th>
+              <th class="num">期首簿価</th><th class="num">本年償却費</th>
+              <th class="num">必要経費算入額</th><th class="num">期末簿価</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
