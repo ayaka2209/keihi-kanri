@@ -16,6 +16,17 @@ async function api(path, opts) {
 
 const yen = (n) => Number(n || 0).toLocaleString("ja-JP");
 
+// 事業分 = 金額 × 事業割合(%)（四捨五入）。バックエンドの business_share と揃える
+const bizShare = (amount, ratio) =>
+  Math.round((Number(amount || 0) * (ratio ?? 100)) / 100);
+
+// 固定資産の償却区分の表示名
+const METHOD_LABELS = {
+  straight_line: "通常",
+  lump_sum_3y: "一括償却",
+  small_special: "少額特例",
+};
+
 let META = { payments: [], today: "" };
 let CATEGORIES = [];
 
@@ -89,6 +100,7 @@ $("#expense-form").addEventListener("submit", async (e) => {
     date: $("#f-date").value,
     category: $("#f-category").value,
     amount: $("#f-amount").value,
+    business_ratio: Number($("#f-ratio").value || 100),
     payee: $("#f-payee").value.trim(),
     payment: $("#f-payment").value,
     memo: $("#f-memo").value.trim(),
@@ -142,6 +154,7 @@ function startEdit(row) {
   $("#f-date").value = row.date;
   $("#f-category").value = row.category;
   $("#f-amount").value = row.amount;
+  $("#f-ratio").value = row.business_ratio ?? 100;
   $("#f-payee").value = row.payee || "";
   $("#f-payment").value = row.payment || "";
   $("#f-memo").value = row.memo || "";
@@ -186,6 +199,8 @@ async function loadList() {
       <td>${r.date}</td>
       <td>${r.category}</td>
       <td class="num">${yen(r.amount)}</td>
+      <td class="num">${r.business_ratio ?? 100}%</td>
+      <td class="num">${yen(bizShare(r.amount, r.business_ratio))}</td>
       <td>${esc(r.payee)}</td>
       <td>${esc(r.payment)}</td>
       <td>${esc(r.memo)}</td>
@@ -301,6 +316,7 @@ async function loadAssets() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${esc(r.name)}</td>
+      <td>${METHOD_LABELS[r.depreciation_method] || r.depreciation_method}</td>
       <td>${r.acquisition_date}</td>
       <td class="num">${yen(r.acquisition_cost)}</td>
       <td class="num">${r.useful_life_years}年</td>
@@ -327,6 +343,7 @@ $("#asset-form").addEventListener("submit", async (e) => {
     name: $("#a-name").value.trim(),
     acquisition_cost: Number($("#a-cost").value),
     acquisition_date: $("#a-acq-date").value,
+    depreciation_method: $("#a-method").value,
     useful_life_years: Number($("#a-life").value),
     business_ratio: Number($("#a-ratio").value || 100),
     disposal_date: $("#a-disposal").value || null,
@@ -376,6 +393,7 @@ function startEditAsset(row) {
   $("#a-name").value = row.name;
   $("#a-cost").value = row.acquisition_cost;
   $("#a-acq-date").value = row.acquisition_date;
+  $("#a-method").value = row.depreciation_method || "straight_line";
   $("#a-life").value = row.useful_life_years;
   $("#a-ratio").value = row.business_ratio;
   $("#a-disposal").value = row.disposal_date || "";
@@ -407,6 +425,7 @@ async function loadDepreciation() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${esc(r.name)}</td>
+      <td>${METHOD_LABELS[r.method] || r.method}</td>
       <td class="num">${yen(r.acquisition_cost)}</td>
       <td class="num">${r.useful_life_years}年</td>
       <td class="num">${r.rate.toFixed(3)}</td>
@@ -419,7 +438,7 @@ async function loadDepreciation() {
     tbody.appendChild(tr);
   });
   if (d.details.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty">この年に償却する固定資産はありません</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty">この年に償却する固定資産はありません</td></tr>';
   }
 }
 

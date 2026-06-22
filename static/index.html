@@ -33,6 +33,9 @@
           <label>金額（円・税込）<span class="req">*</span>
             <input type="number" id="f-amount" min="0" step="1" required placeholder="例: 1200" />
           </label>
+          <label>事業割合（%）
+            <input type="number" id="f-ratio" min="0" max="100" step="1" value="100" />
+          </label>
           <label>支払先
             <input type="text" id="f-payee" placeholder="例: ○○商店" list="payee-list" />
             <datalist id="payee-list"></datalist>
@@ -73,6 +76,7 @@
           <thead>
             <tr>
               <th>日付</th><th>勘定科目</th><th class="num">金額</th>
+              <th class="num">事業割合</th><th class="num">事業分</th>
               <th>支払先</th><th>支払方法</th><th>摘要</th><th>領収</th><th></th>
             </tr>
           </thead>
@@ -131,6 +135,13 @@
           <label>取得価額（円・税込）<span class="req">*</span>
             <input type="number" id="a-cost" min="1" step="1" required placeholder="例: 2400000" />
           </label>
+          <label>償却区分<span class="req">*</span>
+            <select id="a-method" required>
+              <option value="straight_line">通常の減価償却（定額法）</option>
+              <option value="lump_sum_3y">一括償却資産（3年均等・10〜20万円）</option>
+              <option value="small_special">少額特例（即時全額・青色, 30万円未満）</option>
+            </select>
+          </label>
           <label>取得日（事業供用開始日）<span class="req">*</span>
             <input type="date" id="a-acq-date" required />
           </label>
@@ -159,9 +170,11 @@
         </div>
       </form>
       <p class="hint">
-        車・PC・建物などは「経費」ではなく固定資産として登録します。毎年の減価償却費（定額法）は
-        取得情報から自動計算され、「集計・確定申告」タブの科目別集計（減価償却費）と年間合計に
-        反映されます。
+        車・PC・建物などは「経費」ではなく固定資産として登録します。毎年の減価償却費は取得情報から
+        自動計算され、「集計・確定申告」タブの科目別集計（減価償却費）と年間合計に反映されます。<br />
+        償却区分：<strong>通常</strong>＝定額法で耐用年数にわたり償却／<strong>一括償却</strong>＝3年均等
+        （耐用年数は不問）／<strong>少額特例</strong>＝取得年に全額（青色・30万円未満）。
+        ※ 10万円未満のものは固定資産ではなく「経費を入力」タブで消耗品費などとして計上してください。
       </p>
 
       <h3>登録済みの固定資産</h3>
@@ -169,7 +182,7 @@
         <table id="asset-table">
           <thead>
             <tr>
-              <th>資産名</th><th>取得日</th><th class="num">取得価額</th>
+              <th>資産名</th><th>区分</th><th>取得日</th><th class="num">取得価額</th>
               <th class="num">耐用年数</th><th class="num">事業割合</th>
               <th>除却日</th><th></th>
             </tr>
@@ -189,7 +202,7 @@
         <table id="dep-table">
           <thead>
             <tr>
-              <th>資産名</th><th class="num">取得価額</th><th class="num">耐用年数</th>
+              <th>資産名</th><th>区分</th><th class="num">取得価額</th><th class="num">耐用年数</th>
               <th class="num">償却率</th><th class="num">事業割合</th><th class="num">本年月数</th>
               <th class="num">期首簿価</th><th class="num">本年償却費</th>
               <th class="num">必要経費算入額</th><th class="num">期末簿価</th>

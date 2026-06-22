@@ -81,6 +81,10 @@ class Expense(Base):
     date: Mapped[datetime.date] = mapped_column(Date, nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False)  # 勘定科目
     amount: Mapped[int] = mapped_column(Integer, nullable=False)  # 金額（円・税込）
+    # 事業按分率(0〜100%)。既存行のため server_default="100"。事業分=amount×割合
+    business_ratio: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="100", default=100
+    )
     payee: Mapped[str] = mapped_column(String(200), default="")  # 支払先
     payment: Mapped[str] = mapped_column(String(50), default="")  # 支払方法
     memo: Mapped[str] = mapped_column(String(500), default="")  # 摘要

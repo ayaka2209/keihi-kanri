@@ -40,6 +40,31 @@ def test_create_and_list_expense(db):
     assert rows[0].user_id == user.id
 
 
+def test_expense_business_ratio(db):
+    user = _make_user(db)
+
+    # 既定は100%
+    created = crud.create_expense(
+        db,
+        user.id,
+        schemas.ExpenseCreate(date=datetime.date(2026, 6, 9), category="通信費", amount=10000),
+    )
+    assert created.business_ratio == 100
+
+    # 明示した割合が保持される
+    created2 = crud.create_expense(
+        db,
+        user.id,
+        schemas.ExpenseCreate(
+            date=datetime.date(2026, 6, 9),
+            category="旅費交通費",
+            amount=3000,
+            business_ratio=70,
+        ),
+    )
+    assert created2.business_ratio == 70
+
+
 def test_add_and_list_categories(db):
     user = _make_user(db)
 

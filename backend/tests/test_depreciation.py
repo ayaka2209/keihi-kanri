@@ -94,6 +94,57 @@ def test_disposal_stops_depreciation():
     assert disposal_year.depreciation_amount == 133_600  # 200,400 × 8/12
 
 
+# ---- 一括償却資産（3年均等・月割りなし）-------------------------------
+def test_lump_sum_3y():
+    sched = dep.build_schedule(
+        acquisition_cost=180_000,
+        useful_life_years=4,  # 一括償却では耐用年数は無視される
+        acquisition_date=datetime.date(2024, 7, 1),  # 月割りなし
+        business_ratio=100,
+        method="lump_sum_3y",
+    )
+    assert [s.year for s in sched] == [2024, 2025, 2026]
+    assert [s.depreciation_amount for s in sched] == [60_000, 60_000, 60_000]
+    assert sched[-1].closing_book_value == 0  # 1円備忘は残さない
+    assert sum(s.depreciation_amount for s in sched) == 180_000
+
+
+def test_lump_sum_3y_remainder_in_last_year():
+    sched = dep.build_schedule(
+        acquisition_cost=200_000,
+        useful_life_years=4,
+        acquisition_date=datetime.date(2024, 1, 1),
+        business_ratio=100,
+        method="lump_sum_3y",
+    )
+    # 端数は最終年に寄せ、合計＝取得価額
+    assert [s.depreciation_amount for s in sched] == [66_666, 66_666, 66_668]
+    assert sum(s.depreciation_amount for s in sched) == 200_000
+
+
+# ---- 少額減価償却資産の特例（即時全額償却）-----------------------------
+def test_small_special_immediate():
+    sched = dep.build_schedule(
+        acquisition_cost=250_000,
+        useful_life_years=4,
+        acquisition_date=datetime.date(2024, 7, 1),
+        business_ratio=80,
+        method="small_special",
+    )
+    assert len(sched) == 1
+    assert sched[0].year == 2024
+    assert sched[0].depreciation_amount == 250_000  # 取得年に全額
+    assert sched[0].business_amount == 200_000  # 250,000 × 80%
+    assert sched[0].closing_book_value == 0
+
+
+# ---- 事業按分の共有ヘルパ ----------------------------------------------
+def test_business_share_rounds_half_up():
+    assert dep.business_share(1000, 100) == 1000
+    assert dep.business_share(1000, 70) == 700
+    assert dep.business_share(1235, 50) == 618  # 617.5 → 四捨五入
+
+
 # ---- 特定年だけ取り出すヘルパ ------------------------------------------
 def test_for_year_returns_none_before_service():
     kwargs = dict(
