@@ -10,16 +10,32 @@ API層(main.py)は「何をしたいか」だけを呼び出し、
 """
 
 import datetime
-from sqlalchemy import select, func
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import models, schemas
+from . import depreciation, models, schemas
 
 DEFAULT_CATEGORIES = [
-    "租税公課", "荷造運賃", "水道光熱費", "旅費交通費", "通信費",
-    "広告宣伝費", "接待交際費", "損害保険料", "修繕費", "消耗品費",
-    "減価償却費", "福利厚生費", "外注工賃", "利子割引料", "地代家賃",
-    "新聞図書費", "会議費", "支払手数料", "雑費",
+    "租税公課",
+    "荷造運賃",
+    "水道光熱費",
+    "旅費交通費",
+    "通信費",
+    "広告宣伝費",
+    "接待交際費",
+    "損害保険料",
+    "修繕費",
+    "消耗品費",
+    "減価償却費",
+    "福利厚生費",
+    "外注工賃",
+    "利子割引料",
+    "地代家賃",
+    "新聞図書費",
+    "会議費",
+    "支払手数料",
+    "雑費",
 ]
 
 PAYMENT_METHODS = ["現金", "クレジットカード", "口座振替", "銀行振込", "電子マネー", "その他"]
@@ -57,16 +73,12 @@ def list_expenses(
         stmt = stmt.where(models.Expense.category == category)
     if keyword:
         like = f"%{keyword}%"
-        stmt = stmt.where(
-            models.Expense.payee.ilike(like) | models.Expense.memo.ilike(like)
-        )
+        stmt = stmt.where(models.Expense.payee.ilike(like) | models.Expense.memo.ilike(like))
     stmt = stmt.order_by(models.Expense.date.desc(), models.Expense.id.desc())
     return list(db.scalars(stmt).all())
 
 
-def create_expense(
-    db: Session, user_id: int, data: schemas.ExpenseCreate
-) -> models.Expense:
+def create_expense(db: Session, user_id: int, data: schemas.ExpenseCreate) -> models.Expense:
     obj = models.Expense(user_id=user_id, **data.model_dump())
     db.add(obj)
     db.commit()
@@ -143,10 +155,35 @@ def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
 
     total = db.scalar(select(func.coalesce(func.sum(base.c.amount), 0))) or 0
     count = db.scalar(select(func.count()).select_from(base)) or 0
+    total = int(total)
+
+    # 固定資産の減価償却費（事業分）を「減価償却費」科目と合計に合算する。
+    # 確定申告書の経費欄にそのまま転記できることが価値の中心なので、ここに正しく出す。
+    # 月別推移(by_month)には載せない（償却は月次の現金支出ではないため）。
+    dep = get_depreciation_for_year(db, user_id, y)
+    dep_total = dep.total_business_amount
+    if dep_total:
+        total += dep_total
+        for ct in by_category:
+            if ct.category == "減価償却費":
+                ct.total += dep_total
+                ct.count += len(dep.details)
+                break
+        else:
+            by_category.append(
+                schemas.CategoryTotal(
+                    category="減価償却費", total=dep_total, count=len(dep.details)
+                )
+            )
+        by_category.sort(key=lambda c: c.total, reverse=True)
 
     return schemas.Summary(
-        year=y, total=int(total), count=int(count),
-        by_month=by_month, by_category=by_category,
+        year=y,
+        total=total,
+        count=int(count),
+        by_month=by_month,
+        by_category=by_category,
+        depreciation_total=dep_total,
     )
 
 
@@ -188,3 +225,93 @@ def add_category(db: Session, user_id: int, name: str) -> None:
     )
     db.add(models.Category(user_id=user_id, name=name, sort=(max_sort or 0) + 1))
     db.commit()
+
+
+# ---- 固定資産 -------------------------------------------------------------
+def list_fixed_assets(db: Session, user_id: int) -> list[models.FixedAsset]:
+    stmt = (
+        select(models.FixedAsset)
+        .where(models.FixedAsset.user_id == user_id)
+        .order_by(models.FixedAsset.acquisition_date.desc(), models.FixedAsset.id.desc())
+    )
+    return list(db.scalars(stmt).all())
+
+
+def create_fixed_asset(
+    db: Session, user_id: int, data: schemas.FixedAssetCreate
+) -> models.FixedAsset:
+    obj = models.FixedAsset(user_id=user_id, **data.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def update_fixed_asset(
+    db: Session, user_id: int, asset_id: int, data: schemas.FixedAssetUpdate
+) -> models.FixedAsset | None:
+    obj = db.scalar(
+        select(models.FixedAsset).where(
+            models.FixedAsset.id == asset_id, models.FixedAsset.user_id == user_id
+        )
+    )
+    if obj is None:
+        return None
+    for key, value in data.model_dump().items():
+        setattr(obj, key, value)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def delete_fixed_asset(db: Session, user_id: int, asset_id: int) -> bool:
+    obj = db.scalar(
+        select(models.FixedAsset).where(
+            models.FixedAsset.id == asset_id, models.FixedAsset.user_id == user_id
+        )
+    )
+    if obj is None:
+        return False
+    db.delete(obj)
+    db.commit()
+    return True
+
+
+# ---- 減価償却（その年の明細・合計） ---------------------------------------
+def get_depreciation_for_year(db: Session, user_id: int, year: int) -> schemas.DepreciationSummary:
+    """登録済みの固定資産から、その年の減価償却費（事業分）を計算して返す。
+
+    償却費は保存せず取得情報からその都度計算する（depreciation.py）。
+    func.extract は使わないので SQLite でもそのまま動く。
+    """
+    details: list[schemas.DepreciationDetail] = []
+    total = 0
+    for asset in list_fixed_assets(db, user_id):
+        entry = depreciation.for_year(
+            year,
+            acquisition_cost=asset.acquisition_cost,
+            useful_life_years=asset.useful_life_years,
+            acquisition_date=asset.acquisition_date,
+            business_ratio=asset.business_ratio,
+            disposal_date=asset.disposal_date,
+        )
+        if entry is None:
+            continue
+        total += entry.business_amount
+        details.append(
+            schemas.DepreciationDetail(
+                asset_id=asset.id,
+                name=asset.name,
+                acquisition_date=asset.acquisition_date,
+                acquisition_cost=asset.acquisition_cost,
+                useful_life_years=asset.useful_life_years,
+                rate=depreciation.annual_rate(asset.useful_life_years),
+                business_ratio=asset.business_ratio,
+                months=entry.months,
+                opening_book_value=entry.opening_book_value,
+                depreciation_amount=entry.depreciation_amount,
+                business_amount=entry.business_amount,
+                closing_book_value=entry.closing_book_value,
+            )
+        )
+    return schemas.DepreciationSummary(year=year, total_business_amount=total, details=details)

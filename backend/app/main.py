@@ -13,18 +13,18 @@ DBの細かい操作はここには書かない（層を分けるのが大規模
 """
 
 import csv
-import io
 import datetime
+import io
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from .database import Base, engine, get_db
 from . import crud, models, schemas
+from .database import Base, engine, get_db
 
 # フロントエンド（静的ファイル）の場所： backend/app/ から見た ../../static
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
@@ -139,6 +139,110 @@ def post_category(
     return {"name": data.name}
 
 
+# ---- 固定資産 -------------------------------------------------------------
+@app.get("/api/assets", response_model=list[schemas.FixedAssetOut])
+def get_assets(
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.list_fixed_assets(db, uid)
+
+
+@app.post("/api/assets", response_model=schemas.FixedAssetOut)
+def post_asset(
+    data: schemas.FixedAssetCreate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.create_fixed_asset(db, uid, data)
+
+
+@app.put("/api/assets/{asset_id}", response_model=schemas.FixedAssetOut)
+def put_asset(
+    asset_id: int,
+    data: schemas.FixedAssetUpdate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    obj = crud.update_fixed_asset(db, uid, asset_id, data)
+    if obj is None:
+        raise HTTPException(404, "対象の固定資産が見つかりません")
+    return obj
+
+
+@app.delete("/api/assets/{asset_id}")
+def remove_asset(
+    asset_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    if not crud.delete_fixed_asset(db, uid, asset_id):
+        raise HTTPException(404, "対象の固定資産が見つかりません")
+    return {"deleted": asset_id}
+
+
+# ---- 減価償却（その年の明細） ---------------------------------------------
+@app.get("/api/depreciation", response_model=schemas.DepreciationSummary)
+def depreciation(
+    year: str | None = None,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    y = int(year) if year else datetime.date.today().year
+    return crud.get_depreciation_for_year(db, uid, y)
+
+
+# ---- 固定資産の減価償却CSV（確定申告「減価償却費の計算」欄用） -----------
+@app.get("/api/assets_export.csv")
+def export_assets_csv(
+    year: str | None = None,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    y = int(year) if year else datetime.date.today().year
+    result = crud.get_depreciation_for_year(db, uid, y)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "資産名",
+            "取得年月日",
+            "取得価額",
+            "耐用年数",
+            "償却率",
+            "事業専用割合",
+            "本年中の償却期間(月)",
+            "期首帳簿価額",
+            "本年分の償却費",
+            "本年分の必要経費算入額",
+            "期末帳簿価額",
+        ]
+    )
+    for d in result.details:
+        writer.writerow(
+            [
+                d.name,
+                d.acquisition_date.isoformat(),
+                d.acquisition_cost,
+                d.useful_life_years,
+                d.rate,
+                f"{d.business_ratio}%",
+                d.months,
+                d.opening_book_value,
+                d.depreciation_amount,
+                d.business_amount,
+                d.closing_book_value,
+            ]
+        )
+    # Excelで文字化けしないようBOM付きUTF-8
+    body = ("﻿" + buf.getvalue()).encode("utf-8")
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="genka_shokyaku_{y}.csv"'},
+    )
+
+
 # ---- CSV出力（確定申告用） ------------------------------------------------
 @app.get("/api/export.csv")
 def export_csv(
@@ -152,10 +256,17 @@ def export_csv(
     writer = csv.writer(buf)
     writer.writerow(["日付", "勘定科目", "金額", "支払先", "支払方法", "摘要", "領収書"])
     for r in sorted(rows, key=lambda x: x.date):
-        writer.writerow([
-            r.date.isoformat(), r.category, r.amount,
-            r.payee, r.payment, r.memo, "有" if r.receipt else "",
-        ])
+        writer.writerow(
+            [
+                r.date.isoformat(),
+                r.category,
+                r.amount,
+                r.payee,
+                r.payment,
+                r.memo,
+                "有" if r.receipt else "",
+            ]
+        )
     # Excelで文字化けしないようBOM付きUTF-8
     body = ("﻿" + buf.getvalue()).encode("utf-8")
     return Response(

@@ -10,7 +10,7 @@ FastAPIはこの型を使って、
 
 import datetime
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ---- 経費 -----------------------------------------------------------------
@@ -60,8 +60,71 @@ class Summary(BaseModel):
     count: int
     by_month: list[MonthTotal]
     by_category: list[CategoryTotal]
+    # 減価償却費（事業分）の合計。total と by_category には含むが、by_month には
+    # 含めない（償却は月次の現金支出ではないため）。UI の注記用。
+    depreciation_total: int = 0
 
 
 # ---- 勘定科目 -------------------------------------------------------------
 class CategoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+
+
+# ---- 固定資産 -------------------------------------------------------------
+class FixedAssetBase(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    acquisition_date: datetime.date  # 事業供用開始日
+    acquisition_cost: int = Field(ge=1)  # 取得価額（円）
+    useful_life_years: int = Field(ge=1, le=100)  # 耐用年数
+    business_ratio: int = Field(default=100, ge=0, le=100)  # 事業按分率（%）
+    depreciation_method: str = "straight_line"  # 現状は定額法のみ
+    disposal_date: datetime.date | None = None  # 売却・除却日（任意）
+    memo: str = ""
+
+    @model_validator(mode="after")
+    def _disposal_not_before_acquisition(self) -> "FixedAssetBase":
+        # 除却日が取得日より前だと供用月数が0になり、償却が静かに0円になってしまう。
+        if self.disposal_date is not None and self.disposal_date < self.acquisition_date:
+            raise ValueError("disposal_date は acquisition_date 以降にしてください")
+        return self
+
+
+class FixedAssetCreate(FixedAssetBase):
+    """登録時に受け取る形（POST）。"""
+
+
+class FixedAssetUpdate(FixedAssetBase):
+    """更新時に受け取る形（PUT）。"""
+
+
+class FixedAssetOut(FixedAssetBase):
+    """APIが返す形。"""
+
+    id: int
+    created_at: datetime.datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---- 減価償却（その年の明細） ---------------------------------------------
+class DepreciationDetail(BaseModel):
+    """資産1件・その年の償却明細（申告書「減価償却費の計算」欄に対応）。"""
+
+    asset_id: int
+    name: str
+    acquisition_date: datetime.date
+    acquisition_cost: int
+    useful_life_years: int
+    rate: float  # 定額法償却率（例 0.167）
+    business_ratio: int
+    months: int  # その年の供用月数
+    opening_book_value: int  # 期首帳簿価額
+    depreciation_amount: int  # 本年分の償却費（按分前）
+    business_amount: int  # 事業分（必要経費算入額）
+    closing_book_value: int  # 期末帳簿価額
+
+
+class DepreciationSummary(BaseModel):
+    year: int
+    total_business_amount: int  # その年の減価償却費（事業分）合計
+    details: list[DepreciationDetail]
