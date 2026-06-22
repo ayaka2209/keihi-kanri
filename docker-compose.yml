@@ -26,5 +26,23 @@ services:
       timeout: 5s
       retries: 5
 
+  # v2 アプリ本体（FastAPI）をコンテナで動かす。
+  #   起動: docker compose up -d --build
+  #   画面/API: http://localhost:8765
+  app:
+    build:
+      context: .                    # 画面ファイル static/ も含めるためリポジトリ直下を context にする
+      dockerfile: backend/Dockerfile
+    container_name: keihi-app
+    restart: unless-stopped
+    ports:
+      - "8765:8765"                 # ホスト8765 → コンテナ8765（ポートは固定）
+    environment:
+      # コンテナ内からは localhost ではなく サービス名 db で DB に繋ぐ
+      DATABASE_URL: "postgresql+psycopg2://keihi:keihi_dev_password@db:5432/keihi"
+    depends_on:
+      db:
+        condition: service_healthy  # DB が healthy になってからアプリを起動
+
 volumes:
   pgdata:

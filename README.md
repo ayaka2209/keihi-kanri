@@ -45,6 +45,43 @@ python3 app.py
 青色申告決算書の標準的な経費科目を最初から登録済みです。
 不足する科目は「集計・確定申告」タブの一番下から追加できます。
 
+## v2（FastAPI + PostgreSQL）を Docker で起動する
+
+上の手順は v1（`legacy/app.py`・SQLite・追加インストール不要）の使い方です。
+開発対象の **v2** は FastAPI + PostgreSQL で動き、DB とアプリの両方をコンテナで起動します。
+
+### 前提
+- Docker エンジンが動いていること（`docker info` でエラーが出なければOK）。
+  - macOS 14 Sonoma 以降: Docker Desktop。
+  - macOS 13 Ventura など古いOS: Colima 等で docker エンジンを用意（`docker compose` はそのまま使える）。
+
+### 起動・停止
+
+```bash
+docker compose up -d --build   # ビルドして起動（コードを変更したら毎回これ）
+docker compose up -d           # コード未変更なら再ビルド不要
+docker compose ps              # コンテナの状態を確認
+docker compose logs app -f     # アプリのログを追う（Ctrl+C で離脱）
+docker compose stop            # 止める（コンテナ・データは残る）
+docker compose down            # コンテナを削除（データ pgdata は残る）
+```
+
+起動後、ブラウザで **http://localhost:8765** を開く（ポートは 8765 固定）。
+API ドキュメントは http://localhost:8765/docs 。
+
+### 注意
+- データは名前付きボリューム `pgdata` に保存され、`down` してもデータは消えません。
+  **`docker compose down -v` は実行しないこと**（`-v` を付けるとデータごと全消し）。
+- `.env` は使わず、接続先（`DATABASE_URL`）は `docker-compose.yml` の `app` サービスに設定済み。
+
+### Docker を使わずローカルで動かす場合
+DB だけ Docker で起動し、アプリは Mac 上で直接動かすこともできます。
+
+```bash
+docker compose up -d db                                    # DBだけ起動
+cd backend && uvicorn app.main:app --reload --port 8765    # アプリは直接起動
+```
+
 ## 今後の拡張（メモ）
 
 - レシート写真からのOCR自動入力

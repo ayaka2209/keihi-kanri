@@ -1,0 +1,26 @@
+# イメージに入れない物（ビルドを軽く・速くする）
+.git
+.gitignore
+**/.venv
+venv/
+env/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+
+# データ・秘密情報
+*.db
+*.sqlite
+*.sqlite3
+.env
+**/.env
+
+# v1（凍結）はコンテナに含めない
+legacy/
+
+# Claude Code / エディタ / OS
+.claude/
+.idea/
+.vscode/
+.DS_Store
+*.log
