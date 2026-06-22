@@ -119,43 +119,31 @@ def delete_expense(db: Session, user_id: int, expense_id: int) -> bool:
 # ---- 集計 -----------------------------------------------------------------
 def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
     y = int(year)
-    base = (
+    # 事業按分を1件ずつ正しく丸めるため、その年の経費を取得して Python 側で集計する。
+    # （金額そのものではなく「事業分 = 金額 × 事業按分率」を集計対象にする）
+    expenses = db.scalars(
         select(models.Expense)
         .where(models.Expense.user_id == user_id)
         .where(func.extract("year", models.Expense.date) == y)
-    ).subquery()
+    ).all()
 
-    # 月別
     by_month = [schemas.MonthTotal(month=m, total=0) for m in range(1, 13)]
-    rows = db.execute(
-        select(
-            func.extract("month", base.c.date).label("m"),
-            func.sum(base.c.amount).label("total"),
-        ).group_by("m")
-    ).all()
-    for r in rows:
-        idx = int(r.m) - 1
-        if 0 <= idx < 12:
-            by_month[idx].total = int(r.total)
+    cat_acc: dict[str, list[int]] = {}  # category -> [事業分合計, 件数]
+    total = 0
+    count = 0
+    for e in expenses:
+        share = depreciation.business_share(e.amount, e.business_ratio)
+        total += share
+        count += 1
+        by_month[e.date.month - 1].total += share
+        acc = cat_acc.setdefault(e.category, [0, 0])
+        acc[0] += share
+        acc[1] += 1
 
-    # 科目別
-    cat_rows = db.execute(
-        select(
-            base.c.category,
-            func.sum(base.c.amount).label("total"),
-            func.count().label("count"),
-        )
-        .group_by(base.c.category)
-        .order_by(func.sum(base.c.amount).desc())
-    ).all()
     by_category = [
-        schemas.CategoryTotal(category=r.category, total=int(r.total), count=int(r.count))
-        for r in cat_rows
+        schemas.CategoryTotal(category=c, total=v[0], count=v[1]) for c, v in cat_acc.items()
     ]
-
-    total = db.scalar(select(func.coalesce(func.sum(base.c.amount), 0))) or 0
-    count = db.scalar(select(func.count()).select_from(base)) or 0
-    total = int(total)
+    by_category.sort(key=lambda c: c.total, reverse=True)
 
     # 固定資産の減価償却費（事業分）を「減価償却費」科目と合計に合算する。
     # 確定申告書の経費欄にそのまま転記できることが価値の中心なので、ここに正しく出す。
@@ -187,17 +175,39 @@ def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
     )
 
 
+def asset_depreciation_years(assets: list[models.FixedAsset], current_year: int) -> set[int]:
+    """固定資産が償却される年（取得〜償却完了、ただし当年まで）の集合。
+
+    経費が無い過去年でも減価償却の明細を画面で遡れるようにするため、
+    年プルダウンの候補に含める。DBに触らない純粋関数（テストしやすい）。
+    """
+    years: set[int] = set()
+    for a in assets:
+        for entry in depreciation.build_schedule(
+            acquisition_cost=a.acquisition_cost,
+            useful_life_years=a.useful_life_years,
+            acquisition_date=a.acquisition_date,
+            business_ratio=a.business_ratio,
+            disposal_date=a.disposal_date,
+            method=a.depreciation_method,
+        ):
+            if entry.year <= current_year:
+                years.add(entry.year)
+    return years
+
+
 def get_years(db: Session, user_id: int) -> list[str]:
     rows = db.execute(
-        select(func.distinct(func.extract("year", models.Expense.date)))
-        .where(models.Expense.user_id == user_id)
-        .order_by(func.extract("year", models.Expense.date).desc())
+        select(func.distinct(func.extract("year", models.Expense.date))).where(
+            models.Expense.user_id == user_id
+        )
     ).all()
-    years = [str(int(r[0])) for r in rows]
-    this_year = str(datetime.date.today().year)
-    if this_year not in years:
-        years.insert(0, this_year)
-    return years
+    years = {int(r[0]) for r in rows}
+    current = datetime.date.today().year
+    years.add(current)
+    # 固定資産の償却年も候補に含める（経費が無い年でも償却を見られるように）
+    years |= asset_depreciation_years(list_fixed_assets(db, user_id), current)
+    return [str(y) for y in sorted(years, reverse=True)]
 
 
 # ---- 勘定科目 -------------------------------------------------------------
@@ -278,6 +288,15 @@ def delete_fixed_asset(db: Session, user_id: int, asset_id: int) -> bool:
 
 
 # ---- 減価償却（その年の明細・合計） ---------------------------------------
+def _display_rate(method: str, useful_life_years: int) -> float:
+    """明細表示用の償却率。区分により意味が異なる。"""
+    if method == "lump_sum_3y":
+        return round(1 / 3, 3)  # 一括償却：3年均等 ≒ 0.333
+    if method == "small_special":
+        return 1.0  # 少額特例：全額
+    return depreciation.annual_rate(useful_life_years)  # 定額法
+
+
 def get_depreciation_for_year(db: Session, user_id: int, year: int) -> schemas.DepreciationSummary:
     """登録済みの固定資産から、その年の減価償却費（事業分）を計算して返す。
 
@@ -294,6 +313,7 @@ def get_depreciation_for_year(db: Session, user_id: int, year: int) -> schemas.D
             acquisition_date=asset.acquisition_date,
             business_ratio=asset.business_ratio,
             disposal_date=asset.disposal_date,
+            method=asset.depreciation_method,
         )
         if entry is None:
             continue
@@ -302,10 +322,11 @@ def get_depreciation_for_year(db: Session, user_id: int, year: int) -> schemas.D
             schemas.DepreciationDetail(
                 asset_id=asset.id,
                 name=asset.name,
+                method=asset.depreciation_method,
                 acquisition_date=asset.acquisition_date,
                 acquisition_cost=asset.acquisition_cost,
                 useful_life_years=asset.useful_life_years,
-                rate=depreciation.annual_rate(asset.useful_life_years),
+                rate=_display_rate(asset.depreciation_method, asset.useful_life_years),
                 business_ratio=asset.business_ratio,
                 months=entry.months,
                 opening_book_value=entry.opening_book_value,

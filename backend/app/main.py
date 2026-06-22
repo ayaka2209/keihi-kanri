@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import crud, models, schemas
+from . import crud, depreciation, models, schemas
 from .database import get_db
 from .migrations import run_migrations
 
@@ -183,7 +183,7 @@ def remove_asset(
 
 # ---- 減価償却（その年の明細） ---------------------------------------------
 @app.get("/api/depreciation", response_model=schemas.DepreciationSummary)
-def depreciation(
+def get_depreciation(
     year: str | None = None,
     db: Session = Depends(get_db),
     uid: int = Depends(current_user_id),
@@ -254,13 +254,17 @@ def export_csv(
     rows = crud.list_expenses(db, uid, year=year)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["日付", "勘定科目", "金額", "支払先", "支払方法", "摘要", "領収書"])
+    writer.writerow(
+        ["日付", "勘定科目", "金額", "事業割合", "事業分", "支払先", "支払方法", "摘要", "領収書"]
+    )
     for r in sorted(rows, key=lambda x: x.date):
         writer.writerow(
             [
                 r.date.isoformat(),
                 r.category,
                 r.amount,
+                f"{r.business_ratio}%",
+                depreciation.business_share(r.amount, r.business_ratio),
                 r.payee,
                 r.payment,
                 r.memo,

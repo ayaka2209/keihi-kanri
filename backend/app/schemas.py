@@ -9,8 +9,12 @@ FastAPIはこの型を使って、
 """
 
 import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+# 固定資産の償却区分
+DepreciationMethod = Literal["straight_line", "lump_sum_3y", "small_special"]
 
 
 # ---- 経費 -----------------------------------------------------------------
@@ -18,6 +22,7 @@ class ExpenseBase(BaseModel):
     date: datetime.date
     category: str = Field(min_length=1, max_length=100)
     amount: int = Field(ge=0)  # 0以上（マイナスは弾く）
+    business_ratio: int = Field(default=100, ge=0, le=100)  # 事業按分率（%）
     payee: str = ""
     payment: str = ""
     memo: str = ""
@@ -77,7 +82,8 @@ class FixedAssetBase(BaseModel):
     acquisition_cost: int = Field(ge=1)  # 取得価額（円）
     useful_life_years: int = Field(ge=1, le=100)  # 耐用年数
     business_ratio: int = Field(default=100, ge=0, le=100)  # 事業按分率（%）
-    depreciation_method: str = "straight_line"  # 現状は定額法のみ
+    # 償却区分: straight_line(定額法) / lump_sum_3y(一括償却) / small_special(少額特例)
+    depreciation_method: DepreciationMethod = "straight_line"
     disposal_date: datetime.date | None = None  # 売却・除却日（任意）
     memo: str = ""
 
@@ -112,10 +118,11 @@ class DepreciationDetail(BaseModel):
 
     asset_id: int
     name: str
+    method: DepreciationMethod  # 償却区分
     acquisition_date: datetime.date
     acquisition_cost: int
     useful_life_years: int
-    rate: float  # 定額法償却率（例 0.167）
+    rate: float  # 償却率（定額法のみ意味を持つ。例 0.167）
     business_ratio: int
     months: int  # その年の供用月数
     opening_book_value: int  # 期首帳簿価額

@@ -92,6 +92,39 @@ def test_disposal_before_acquisition_is_rejected():
     )
 
 
+def test_asset_depreciation_years_spans_acquisition_to_current():
+    """経費が無い過去年でも、資産の償却年が候補に入る（純粋関数）。"""
+    asset = models.FixedAsset(
+        name="車",
+        acquisition_date=datetime.date(2024, 1, 1),
+        acquisition_cost=2_400_000,
+        useful_life_years=6,
+        business_ratio=100,
+        depreciation_method="straight_line",
+    )
+    years = crud.asset_depreciation_years([asset], current_year=2026)
+    assert years == {2024, 2025, 2026}  # 当年(2026)まで、未来は含めない
+
+
+def test_get_depreciation_lump_sum_method(db):
+    """一括償却資産は3年均等で計上される。"""
+    user = _make_user(db)
+    crud.create_fixed_asset(
+        db,
+        user.id,
+        _asset_data(
+            acquisition_cost=180_000,
+            useful_life_years=4,
+            depreciation_method="lump_sum_3y",
+        ),
+    )
+    r2024 = crud.get_depreciation_for_year(db, user.id, 2024)
+    assert r2024.total_business_amount == 60_000
+    assert r2024.details[0].method == "lump_sum_3y"
+    # 4年目(2027)は計上されない
+    assert crud.get_depreciation_for_year(db, user.id, 2027).total_business_amount == 0
+
+
 def test_depreciation_is_per_user(db):
     """他人の資産が混ざらない（マルチテナント）。"""
     me = _make_user(db)

@@ -53,8 +53,32 @@ def build_schedule(
     acquisition_date: datetime.date,
     business_ratio: int,
     disposal_date: datetime.date | None = None,
+    method: str = "straight_line",
 ) -> list[YearlyDepreciation]:
-    """取得から償却完了（または売却・除却）までの年次明細を順に返す。"""
+    """取得から償却完了（または売却・除却）までの年次明細を順に返す。
+
+    method:
+      straight_line … 通常の減価償却（定額法）
+      lump_sum_3y   … 一括償却資産（3年均等・月割りなし。耐用年数/除却は無視）
+      small_special … 少額減価償却資産の特例（取得年に全額即時償却）
+    """
+    if method == "lump_sum_3y":
+        return _lump_sum_schedule(acquisition_cost, acquisition_date, business_ratio)
+    if method == "small_special":
+        return _small_special_schedule(acquisition_cost, acquisition_date, business_ratio)
+    return _straight_line_schedule(
+        acquisition_cost, useful_life_years, acquisition_date, business_ratio, disposal_date
+    )
+
+
+def _straight_line_schedule(
+    acquisition_cost: int,
+    useful_life_years: int,
+    acquisition_date: datetime.date,
+    business_ratio: int,
+    disposal_date: datetime.date | None,
+) -> list[YearlyDepreciation]:
+    """定額法のスケジュール。"""
     rate = annual_rate_thousandths(useful_life_years)
     full_year_amount = _ceil_div(acquisition_cost * rate, 1000)
 
@@ -88,7 +112,7 @@ def build_schedule(
                 opening_book_value=opening,
                 full_year_amount=full_year_amount,
                 depreciation_amount=amount,
-                business_amount=_apply_ratio(amount, business_ratio),
+                business_amount=business_share(amount, business_ratio),
                 closing_book_value=closing,
             )
         )
@@ -104,6 +128,55 @@ def build_schedule(
     return schedule
 
 
+def _lump_sum_schedule(
+    acquisition_cost: int,
+    acquisition_date: datetime.date,
+    business_ratio: int,
+) -> list[YearlyDepreciation]:
+    """一括償却資産：取得価額を3年で均等償却（月割りなし・備忘1円なし）。
+
+    端数は最終年に寄せて合計＝取得価額にする。除却しても3年継続が原則。
+    """
+    schedule: list[YearlyDepreciation] = []
+    base = acquisition_cost // 3
+    accumulated = 0
+    for i in range(3):
+        amount = base if i < 2 else acquisition_cost - base * 2
+        opening = acquisition_cost - accumulated
+        accumulated += amount
+        schedule.append(
+            YearlyDepreciation(
+                year=acquisition_date.year + i,
+                months=12,
+                opening_book_value=opening,
+                full_year_amount=base,
+                depreciation_amount=amount,
+                business_amount=business_share(amount, business_ratio),
+                closing_book_value=acquisition_cost - accumulated,
+            )
+        )
+    return schedule
+
+
+def _small_special_schedule(
+    acquisition_cost: int,
+    acquisition_date: datetime.date,
+    business_ratio: int,
+) -> list[YearlyDepreciation]:
+    """少額減価償却資産の特例：取得年に全額を即時償却する。"""
+    return [
+        YearlyDepreciation(
+            year=acquisition_date.year,
+            months=12,
+            opening_book_value=acquisition_cost,
+            full_year_amount=acquisition_cost,
+            depreciation_amount=acquisition_cost,
+            business_amount=business_share(acquisition_cost, business_ratio),
+            closing_book_value=0,
+        )
+    ]
+
+
 def for_year(
     year: int,
     *,
@@ -112,6 +185,7 @@ def for_year(
     acquisition_date: datetime.date,
     business_ratio: int,
     disposal_date: datetime.date | None = None,
+    method: str = "straight_line",
 ) -> YearlyDepreciation | None:
     """指定年の明細だけ返す。その年が償却対象でなければ None。"""
     for entry in build_schedule(
@@ -120,6 +194,7 @@ def for_year(
         acquisition_date=acquisition_date,
         business_ratio=business_ratio,
         disposal_date=disposal_date,
+        method=method,
     ):
         if entry.year == year:
             return entry
@@ -132,8 +207,11 @@ def _ceil_div(numerator: int, denominator: int) -> int:
     return -(-numerator // denominator)
 
 
-def _apply_ratio(amount: int, ratio: int) -> int:
-    """事業専用割合(%)を掛ける。円未満は四捨五入。"""
+def business_share(amount: int, ratio: int) -> int:
+    """事業専用割合(%)を掛けた「事業分」を返す。円未満は四捨五入。
+
+    減価償却費・経費の事業按分の両方で使う共通ルール。
+    """
     return (amount * ratio + 50) // 100
 
 
