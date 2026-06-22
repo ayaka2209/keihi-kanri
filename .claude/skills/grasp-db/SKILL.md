@@ -29,6 +29,18 @@ description: DBスキーマ・モデル(User/Category/Expense)・マルチテナ
   これは PostgreSQL 前提。**SQLite では EXTRACT が無く動かない**ため、
   テストでは extract 依存の関数（`get_summary` / 年月フィルタ）を避けるか、別途吸収する。
 
-## マイグレーション
-- 現状は起動時に `Base.metadata.create_all()` で作成（`main.py` の lifespan）。
-- **Phase 2 で Alembic 導入予定**。スキーマ変更を入れるなら Alembic 化の要否をユーザーに確認。
+## マイグレーション（Alembic 導入済み）
+- **Alembic でスキーマ管理する**。設定は `backend/alembic.ini` と `backend/alembic/`
+  （`env.py` が `app.config.settings.database_url` と `app.database.Base.metadata` を流用）。
+- アプリ起動時に `app/migrations.py` の `run_migrations()`（= `alembic upgrade head`）が
+  自動実行され、未適用のマイグレーションを当てる（`main.py` の lifespan）。
+  ※ 旧来の `Base.metadata.create_all()` は廃止。**テスト(conftest)だけは create_all のまま**
+  （テストはマイグレーションを介さず models から直接スキーマを作る）。
+- **スキーマを変える手順**（モデル編集後）:
+  ```bash
+  cd backend
+  alembic revision --autogenerate -m "変更内容"   # versions/ に生成 → 必ず中身を確認
+  alembic upgrade head                              # 適用（起動時にも自動適用される）
+  ```
+  自動生成ファイル `alembic/versions/*.py` は lint 対象外（`ruff` で extend-exclude 済み）。
+- 既存DBを後から Alembic 管理下に置くときは `alembic stamp head`（作成済みを適用済み扱い）。

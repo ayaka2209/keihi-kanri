@@ -24,7 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import crud, models, schemas
-from .database import Base, engine, get_db
+from .database import get_db
+from .migrations import run_migrations
 
 # フロントエンド（静的ファイル）の場所： backend/app/ から見た ../../static
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
@@ -32,9 +33,8 @@ STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 起動時：テーブルを作成し、初期データを投入する
-    # （Phase 2 で Alembic マイグレーションに置き換える予定）
-    Base.metadata.create_all(bind=engine)
+    # 起動時：未適用のマイグレーションを適用し（スキーマを最新化）、初期データを投入する。
+    run_migrations()
     db = next(get_db())
     try:
         crud.ensure_seed_data(db)
