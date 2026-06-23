@@ -40,6 +40,9 @@ DEFAULT_CATEGORIES = [
 
 PAYMENT_METHODS = ["現金", "クレジットカード", "口座振替", "銀行振込", "電子マネー", "その他"]
 
+# 収入の初期科目（青色申告。あとから増やす場合はここに足す）
+INCOME_CATEGORIES = ["売上", "雑収入"]
+
 
 # ---- 初期データ -----------------------------------------------------------
 def ensure_seed_data(db: Session) -> int:
@@ -116,6 +119,73 @@ def delete_expense(db: Session, user_id: int, expense_id: int) -> bool:
     return True
 
 
+# ---- 収入 -----------------------------------------------------------------
+def list_incomes(
+    db: Session,
+    user_id: int,
+    year: str | None = None,
+    month: int | None = None,
+    category: str | None = None,
+    keyword: str | None = None,
+) -> list[models.Income]:
+    stmt = select(models.Income).where(models.Income.user_id == user_id)
+    if year:
+        stmt = stmt.where(func.extract("year", models.Income.date) == int(year))
+    if month:
+        stmt = stmt.where(func.extract("month", models.Income.date) == int(month))
+    if category:
+        stmt = stmt.where(models.Income.category == category)
+    if keyword:
+        like = f"%{keyword}%"
+        stmt = stmt.where(models.Income.payer.ilike(like) | models.Income.memo.ilike(like))
+    stmt = stmt.order_by(models.Income.date.desc(), models.Income.id.desc())
+    return list(db.scalars(stmt).all())
+
+
+def create_income(db: Session, user_id: int, data: schemas.IncomeCreate) -> models.Income:
+    obj = models.Income(user_id=user_id, **data.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def update_income(
+    db: Session, user_id: int, income_id: int, data: schemas.IncomeUpdate
+) -> models.Income | None:
+    obj = db.scalar(
+        select(models.Income).where(models.Income.id == income_id, models.Income.user_id == user_id)
+    )
+    if obj is None:
+        return None
+    for key, value in data.model_dump().items():
+        setattr(obj, key, value)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def delete_income(db: Session, user_id: int, income_id: int) -> bool:
+    obj = db.scalar(
+        select(models.Income).where(models.Income.id == income_id, models.Income.user_id == user_id)
+    )
+    if obj is None:
+        return False
+    db.delete(obj)
+    db.commit()
+    return True
+
+
+def get_income_total(db: Session, user_id: int, year: int) -> int:
+    """その年の収入合計（円）。"""
+    total = db.scalar(
+        select(func.coalesce(func.sum(models.Income.amount), 0))
+        .where(models.Income.user_id == user_id)
+        .where(func.extract("year", models.Income.date) == year)
+    )
+    return int(total or 0)
+
+
 # ---- 集計 -----------------------------------------------------------------
 def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
     y = int(year)
@@ -165,6 +235,9 @@ def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
             )
         by_category.sort(key=lambda c: c.total, reverse=True)
 
+    # 損益: 収入合計 − 経費合計(total。事業分＋減価償却を含む)
+    income_total = get_income_total(db, user_id, y)
+
     return schemas.Summary(
         year=y,
         total=total,
@@ -172,6 +245,8 @@ def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
         by_month=by_month,
         by_category=by_category,
         depreciation_total=dep_total,
+        income_total=income_total,
+        profit=income_total - total,
     )
 
 
@@ -207,6 +282,13 @@ def get_years(db: Session, user_id: int) -> list[str]:
     years.add(current)
     # 固定資産の償却年も候補に含める（経費が無い年でも償却を見られるように）
     years |= asset_depreciation_years(list_fixed_assets(db, user_id), current)
+    # 収入の年も候補に含める（経費が無く収入だけある年も選べるように）
+    income_rows = db.execute(
+        select(func.distinct(func.extract("year", models.Income.date))).where(
+            models.Income.user_id == user_id
+        )
+    ).all()
+    years |= {int(r[0]) for r in income_rows}
     return [str(y) for y in sorted(years, reverse=True)]
 
 

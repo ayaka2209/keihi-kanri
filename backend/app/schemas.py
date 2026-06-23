@@ -68,11 +68,38 @@ class Summary(BaseModel):
     # 減価償却費（事業分）の合計。total と by_category には含むが、by_month には
     # 含めない（償却は月次の現金支出ではないため）。UI の注記用。
     depreciation_total: int = 0
+    # 損益: 収入合計と、収入−経費(total)の差引
+    income_total: int = 0
+    profit: int = 0
 
 
 # ---- 勘定科目 -------------------------------------------------------------
 class CategoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+
+
+# ---- 収入 -----------------------------------------------------------------
+class IncomeBase(BaseModel):
+    date: datetime.date
+    category: str = Field(min_length=1, max_length=100)
+    amount: int = Field(ge=0)
+    payer: str = ""  # 取引先（支払元）
+    memo: str = ""
+
+
+class IncomeCreate(IncomeBase):
+    """登録時に受け取る形（POST）。"""
+
+
+class IncomeUpdate(IncomeBase):
+    """更新時に受け取る形（PUT）。"""
+
+
+class IncomeOut(IncomeBase):
+    id: int
+    created_at: datetime.datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---- 固定資産 -------------------------------------------------------------

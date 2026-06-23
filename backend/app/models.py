@@ -94,3 +94,23 @@ class Expense(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="expenses")
+
+
+class Income(Base):
+    """収入（売上・雑収入など）。経費(Expense)と対になる存在。
+    損益 = 収入合計 − 経費合計 を出すために使う。"""
+
+    __tablename__ = "incomes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    date: Mapped[datetime.date] = mapped_column(Date, nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)  # 収入科目
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # 金額（円）
+    payer: Mapped[str] = mapped_column(String(200), default="")  # 取引先（支払元）
+    memo: Mapped[str] = mapped_column(String(500), default="")  # 摘要
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user: Mapped["User"] = relationship()
