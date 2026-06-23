@@ -12,6 +12,7 @@
     <nav>
       <button class="tab active" data-tab="input">経費を入力</button>
       <button class="tab" data-tab="list">一覧</button>
+      <button class="tab" data-tab="income">収入を入力</button>
       <button class="tab" data-tab="summary">集計・確定申告</button>
       <button class="tab" data-tab="assets">固定資産</button>
     </nav>
@@ -86,6 +87,58 @@
       <p class="empty" id="list-empty" hidden>データがありません。</p>
     </section>
 
+    <!-- 収入タブ -->
+    <section id="tab-income" class="tab-panel">
+      <h2 id="income-form-title">収入を入力</h2>
+      <form id="income-form">
+        <input type="hidden" id="income-edit-id" />
+        <div class="grid">
+          <label>日付<span class="req">*</span>
+            <input type="date" id="i-date" required />
+          </label>
+          <label>収入科目<span class="req">*</span>
+            <select id="i-category" required></select>
+          </label>
+          <label>金額（円）<span class="req">*</span>
+            <input type="number" id="i-amount" min="0" step="1" required placeholder="例: 300000" />
+          </label>
+          <label>取引先（支払元）
+            <input type="text" id="i-payer" placeholder="例: 株式会社○○" list="payer-list" />
+            <datalist id="payer-list"></datalist>
+          </label>
+        </div>
+        <label class="full">摘要・メモ
+          <input type="text" id="i-memo" placeholder="例: 5月分の請求" />
+        </label>
+        <div class="actions">
+          <button type="submit" class="primary" id="income-submit-btn">登録する</button>
+          <button type="button" id="income-cancel-edit" class="ghost" hidden>編集をやめる</button>
+          <span id="income-msg" class="msg"></span>
+        </div>
+      </form>
+      <p class="hint">売上や雑収入などを記録します。「集計・確定申告」タブで年間収入と損益（収入−経費）を確認できます。</p>
+
+      <h3>収入一覧</h3>
+      <div class="filters">
+        <select id="income-filter-year"></select>
+        <input type="search" id="income-filter-keyword" placeholder="取引先・摘要で検索" />
+        <a id="income-export-btn" class="btn ghost" href="#">収入CSVダウンロード</a>
+      </div>
+      <div class="list-total">表示中の合計：<strong id="income-total-amount">0</strong> 円（<span id="income-count">0</span>件）</div>
+      <div class="table-wrap">
+        <table id="income-table">
+          <thead>
+            <tr>
+              <th>日付</th><th>収入科目</th><th class="num">金額</th>
+              <th>取引先</th><th>摘要</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty" id="income-empty" hidden>収入はまだ登録されていません。</p>
+    </section>
+
     <!-- 集計タブ -->
     <section id="tab-summary" class="tab-panel">
       <h2>集計・確定申告</h2>
@@ -95,10 +148,18 @@
       </div>
 
       <div class="cards">
-        <div class="card big">
+        <div class="card">
+          <div class="card-label">年間収入</div>
+          <div class="card-value"><span id="sum-income">0</span> 円</div>
+        </div>
+        <div class="card">
           <div class="card-label">年間経費合計</div>
           <div class="card-value"><span id="sum-total">0</span> 円</div>
           <div class="card-sub"><span id="sum-count">0</span> 件</div>
+        </div>
+        <div class="card big">
+          <div class="card-label">損益（収入 − 経費）</div>
+          <div class="card-value"><span id="sum-profit">0</span> 円</div>
         </div>
       </div>
 
@@ -212,6 +273,7 @@
         </table>
       </div>
     </section>
+
   </main>
 
   <script src="/app.js"></script>

@@ -38,6 +38,7 @@ $$(".tab").forEach((btn) => {
     btn.classList.add("active");
     $("#tab-" + btn.dataset.tab).classList.add("active");
     if (btn.dataset.tab === "list") loadList();
+    if (btn.dataset.tab === "income") loadIncome();
     if (btn.dataset.tab === "summary") loadSummary();
     if (btn.dataset.tab === "assets") loadAssets();
   });
@@ -56,8 +57,14 @@ async function init() {
   // 勘定科目セレクト
   fillCategorySelects();
 
+  // 収入科目セレクト
+  $("#i-category").innerHTML = (META.income_categories || [])
+    .map((c) => `<option>${c}</option>`)
+    .join("");
+
   // 日付の初期値＝今日
   $("#f-date").value = META.today;
+  $("#i-date").value = META.today;
 
   // 年セレクト
   await fillYearSelects();
@@ -80,6 +87,7 @@ async function fillYearSelects() {
   $("#filter-year").innerHTML = optHtml;
   $("#summary-year").innerHTML = optHtml;
   $("#dep-year").innerHTML = optHtml;
+  $("#income-filter-year").innerHTML = optHtml;
   // 月セレクト
   $("#filter-month").innerHTML =
     '<option value="">月：すべて</option>' +
@@ -249,6 +257,8 @@ async function loadSummary() {
 
   $("#sum-total").textContent = yen(s.total);
   $("#sum-count").textContent = s.count;
+  $("#sum-income").textContent = yen(s.income_total);
+  $("#sum-profit").textContent = yen(s.profit);
   $("#export-btn").href = "/api/export.csv?year=" + year;
 
   // 減価償却費の注記（科目別・年間合計には含むが、月別推移には含めない）
@@ -443,6 +453,122 @@ async function loadDepreciation() {
 }
 
 $("#dep-year").addEventListener("change", loadDepreciation);
+
+// ---- 収入 -----------------------------------------------------------------
+async function loadIncome() {
+  const params = new URLSearchParams();
+  const y = $("#income-filter-year").value;
+  const k = $("#income-filter-keyword").value.trim();
+  if (y) params.set("year", y);
+  if (k) params.set("keyword", k);
+  $("#income-export-btn").href = "/api/incomes_export.csv?year=" + (y || "");
+
+  const rows = await api("/api/incomes?" + params.toString());
+  const tbody = $("#income-table tbody");
+  tbody.innerHTML = "";
+  let total = 0;
+  rows.forEach((r) => {
+    total += r.amount;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${r.date}</td>
+      <td>${r.category}</td>
+      <td class="num">${yen(r.amount)}</td>
+      <td>${esc(r.payer)}</td>
+      <td>${esc(r.memo)}</td>
+      <td class="num">
+        <button class="row-btn edit">編集</button>
+        <button class="row-btn del">削除</button>
+      </td>`;
+    tr.querySelector(".edit").addEventListener("click", () => startEditIncome(r));
+    tr.querySelector(".del").addEventListener("click", () => removeIncome(r));
+    tbody.appendChild(tr);
+  });
+  $("#income-total-amount").textContent = yen(total);
+  $("#income-count").textContent = rows.length;
+  $("#income-empty").hidden = rows.length > 0;
+
+  // 取引先サジェスト
+  const payers = [...new Set(rows.map((r) => r.payer).filter(Boolean))];
+  $("#payer-list").innerHTML = payers.map((p) => `<option value="${p}">`).join("");
+}
+
+$("#income-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = $("#income-edit-id").value;
+  const data = {
+    date: $("#i-date").value,
+    category: $("#i-category").value,
+    amount: $("#i-amount").value,
+    payer: $("#i-payer").value.trim(),
+    memo: $("#i-memo").value.trim(),
+  };
+  if (!data.date || !data.category || data.amount === "") return;
+
+  try {
+    if (id) {
+      await api(`/api/incomes/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      showMsg("#income-msg", "更新しました");
+      resetIncomeForm();
+    } else {
+      await api("/api/incomes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      showMsg("#income-msg", `登録しました（${yen(data.amount)}円）`);
+      // 連続入力しやすいよう日付・科目は残し金額等のみクリア
+      $("#i-amount").value = "";
+      $("#i-payer").value = "";
+      $("#i-memo").value = "";
+      $("#i-amount").focus();
+    }
+    await fillYearSelects();
+    loadIncome();
+  } catch (err) {
+    showMsg("#income-msg", err.message, true);
+  }
+});
+
+$("#income-cancel-edit").addEventListener("click", resetIncomeForm);
+
+function resetIncomeForm() {
+  $("#income-edit-id").value = "";
+  $("#income-form").reset();
+  $("#i-date").value = META.today;
+  $("#income-form-title").textContent = "収入を入力";
+  $("#income-submit-btn").textContent = "登録する";
+  $("#income-cancel-edit").hidden = true;
+}
+
+function startEditIncome(row) {
+  $("#income-edit-id").value = row.id;
+  $("#i-date").value = row.date;
+  $("#i-category").value = row.category;
+  $("#i-amount").value = row.amount;
+  $("#i-payer").value = row.payer || "";
+  $("#i-memo").value = row.memo || "";
+  $("#income-form-title").textContent = `収入を編集（#${row.id}）`;
+  $("#income-submit-btn").textContent = "更新する";
+  $("#income-cancel-edit").hidden = false;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function removeIncome(row) {
+  if (!confirm(`この収入を削除しますか？\n${row.date} ${row.category} ${yen(row.amount)}円`)) return;
+  await api(`/api/incomes/${row.id}`, { method: "DELETE" });
+  await fillYearSelects();
+  loadIncome();
+}
+
+["income-filter-year"].forEach((id) =>
+  $("#" + id).addEventListener("change", loadIncome)
+);
+$("#income-filter-keyword").addEventListener("input", debounce(loadIncome, 250));
 
 // ---- 起動 -----------------------------------------------------------------
 init();

@@ -58,7 +58,11 @@ def current_user_id(db: Session = Depends(get_db)) -> int:
 # ---- メタ情報 -------------------------------------------------------------
 @app.get("/api/meta")
 def meta():
-    return {"payments": crud.PAYMENT_METHODS, "today": datetime.date.today().isoformat()}
+    return {
+        "payments": crud.PAYMENT_METHODS,
+        "income_categories": crud.INCOME_CATEGORIES,
+        "today": datetime.date.today().isoformat(),
+    }
 
 
 # ---- 経費 -----------------------------------------------------------------
@@ -240,6 +244,74 @@ def export_assets_csv(
         content=body,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="genka_shokyaku_{y}.csv"'},
+    )
+
+
+# ---- 収入 -----------------------------------------------------------------
+@app.get("/api/incomes", response_model=list[schemas.IncomeOut])
+def get_incomes(
+    year: str | None = None,
+    month: int | None = None,
+    category: str | None = None,
+    keyword: str | None = None,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.list_incomes(db, uid, year, month, category, keyword)
+
+
+@app.post("/api/incomes", response_model=schemas.IncomeOut)
+def post_income(
+    data: schemas.IncomeCreate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.create_income(db, uid, data)
+
+
+@app.put("/api/incomes/{income_id}", response_model=schemas.IncomeOut)
+def put_income(
+    income_id: int,
+    data: schemas.IncomeUpdate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    obj = crud.update_income(db, uid, income_id, data)
+    if obj is None:
+        raise HTTPException(404, "対象の収入が見つかりません")
+    return obj
+
+
+@app.delete("/api/incomes/{income_id}")
+def remove_income(
+    income_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    if not crud.delete_income(db, uid, income_id):
+        raise HTTPException(404, "対象の収入が見つかりません")
+    return {"deleted": income_id}
+
+
+@app.get("/api/incomes_export.csv")
+def export_incomes_csv(
+    year: str | None = None,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    year = year or str(datetime.date.today().year)
+    rows = crud.list_incomes(db, uid, year=year)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["日付", "収入科目", "金額", "取引先", "摘要"])
+    for r in sorted(rows, key=lambda x: x.date):
+        writer.writerow([r.date.isoformat(), r.category, r.amount, r.payer, r.memo])
+    # Excelで文字化けしないようBOM付きUTF-8
+    body = ("﻿" + buf.getvalue()).encode("utf-8")
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="shunyu_{year}.csv"'},
     )
 
 
