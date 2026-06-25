@@ -15,6 +15,7 @@
       <button class="tab" data-tab="income">収入を入力</button>
       <button class="tab" data-tab="summary">集計・確定申告</button>
       <button class="tab" data-tab="assets">固定資産</button>
+      <button class="tab" data-tab="quotes">見積書</button>
     </nav>
   </header>
 
@@ -274,7 +275,102 @@
       </div>
     </section>
 
+    <!-- 見積書タブ -->
+    <section id="tab-quotes" class="tab-panel">
+      <h2 id="quote-form-title">見積書を作成</h2>
+      <form id="quote-form">
+        <input type="hidden" id="quote-edit-id" />
+        <div class="grid">
+          <label>取引先（マスタから選ぶ）
+            <select id="q-client">
+              <option value="">（直接入力）</option>
+            </select>
+          </label>
+          <label>宛名<span class="req">*</span>
+            <input type="text" id="q-client-name" required placeholder="例: 株式会社サンプル" />
+          </label>
+          <label>敬称
+            <select id="q-honorific">
+              <option value="御中">御中</option>
+              <option value="様">様</option>
+            </select>
+          </label>
+          <label>件名
+            <input type="text" id="q-subject" placeholder="例: Webサイト制作一式" />
+          </label>
+          <label>発行日<span class="req">*</span>
+            <input type="date" id="q-issue-date" required />
+          </label>
+          <label>有効期限
+            <input type="date" id="q-valid-until" />
+          </label>
+          <label>消費税
+            <select id="q-tax-mode">
+              <option value="exclusive">税抜（外税・単価に税を上乗せ）</option>
+              <option value="inclusive">税込（内税・単価に税を含む）</option>
+            </select>
+          </label>
+          <label>税率（%）
+            <input type="number" id="q-tax-rate" min="0" max="100" step="1" value="10" />
+          </label>
+        </div>
+
+        <h3>明細</h3>
+        <div class="table-wrap">
+          <table id="quote-item-table">
+            <thead>
+              <tr>
+                <th>品名・項目</th><th class="num">数量</th><th>単位</th>
+                <th class="num">単価</th><th class="num">金額</th><th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="actions">
+          <button type="button" id="q-add-item" class="ghost">＋ 行を追加</button>
+        </div>
+
+        <div class="quote-totals">
+          <div>小計（税抜）：<strong id="q-subtotal">0</strong> 円</div>
+          <div>消費税：<strong id="q-tax">0</strong> 円</div>
+          <div class="big">合計：<strong id="q-total">0</strong> 円</div>
+        </div>
+
+        <label class="full">備考
+          <input type="text" id="q-notes" placeholder="例: お支払いは納品後末締め翌月末払い" />
+        </label>
+
+        <div class="actions">
+          <button type="submit" class="primary" id="quote-submit-btn">この内容で保存する</button>
+          <button type="button" id="quote-cancel-edit" class="ghost" hidden>編集をやめる</button>
+          <button type="button" id="q-save-client" class="ghost">この宛先を取引先に保存</button>
+          <span id="quote-msg" class="msg"></span>
+        </div>
+      </form>
+      <p class="hint">
+        保存すると見積番号（発行年＋連番）が自動で振られます。一覧の「印刷」からブラウザの印刷ダイアログを開き、
+        「PDFとして保存」を選ぶと送付用のPDFになります。
+      </p>
+
+      <h3>作成済みの見積書</h3>
+      <div class="table-wrap">
+        <table id="quote-table">
+          <thead>
+            <tr>
+              <th>見積番号</th><th>発行日</th><th>宛名</th><th>件名</th>
+              <th class="num">合計</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty" id="quote-empty" hidden>見積書はまだありません。</p>
+    </section>
   </main>
+
+  <!-- 印刷専用の見積書（画面では非表示、印刷時のみ表示） -->
+  <div id="print-area" aria-hidden="true"></div>
 
   <script src="/app.js"></script>
 </body>

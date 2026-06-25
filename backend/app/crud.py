@@ -418,3 +418,125 @@ def get_depreciation_for_year(db: Session, user_id: int, year: int) -> schemas.D
             )
         )
     return schemas.DepreciationSummary(year=year, total_business_amount=total, details=details)
+
+
+# ---- 取引先（見積・請求の宛先マスタ） -------------------------------------
+def list_clients(db: Session, user_id: int) -> list[models.Client]:
+    stmt = (
+        select(models.Client)
+        .where(models.Client.user_id == user_id)
+        .order_by(models.Client.name, models.Client.id)
+    )
+    return list(db.scalars(stmt).all())
+
+
+def create_client(db: Session, user_id: int, data: schemas.ClientCreate) -> models.Client:
+    obj = models.Client(user_id=user_id, **data.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def update_client(
+    db: Session, user_id: int, client_id: int, data: schemas.ClientUpdate
+) -> models.Client | None:
+    obj = db.scalar(
+        select(models.Client).where(models.Client.id == client_id, models.Client.user_id == user_id)
+    )
+    if obj is None:
+        return None
+    for key, value in data.model_dump().items():
+        setattr(obj, key, value)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def delete_client(db: Session, user_id: int, client_id: int) -> bool:
+    obj = db.scalar(
+        select(models.Client).where(models.Client.id == client_id, models.Client.user_id == user_id)
+    )
+    if obj is None:
+        return False
+    db.delete(obj)
+    db.commit()
+    return True
+
+
+# ---- 見積書 ---------------------------------------------------------------
+def _next_quote_no(db: Session, user_id: int, year: int) -> str:
+    """その年の見積番号を「YYYY-連番(3桁)」で採番する。
+
+    func.extract を避けるため、文字列の前方一致(LIKE)で当年分を絞る
+    （SQLite でもそのまま動く）。連番は当年の最大値＋1。
+    """
+    prefix = f"{year}-"
+    nos = db.scalars(
+        select(models.Quote.quote_no)
+        .where(models.Quote.user_id == user_id)
+        .where(models.Quote.quote_no.like(f"{prefix}%"))
+    ).all()
+    max_n = 0
+    for no in nos:
+        tail = no[len(prefix) :]
+        if tail.isdigit():
+            max_n = max(max_n, int(tail))
+    return f"{prefix}{max_n + 1:03d}"
+
+
+def list_quotes(db: Session, user_id: int) -> list[models.Quote]:
+    stmt = (
+        select(models.Quote)
+        .where(models.Quote.user_id == user_id)
+        .order_by(models.Quote.issue_date.desc(), models.Quote.id.desc())
+    )
+    return list(db.scalars(stmt).all())
+
+
+def get_quote(db: Session, user_id: int, quote_id: int) -> models.Quote | None:
+    return db.scalar(
+        select(models.Quote).where(models.Quote.id == quote_id, models.Quote.user_id == user_id)
+    )
+
+
+def create_quote(db: Session, user_id: int, data: schemas.QuoteCreate) -> models.Quote:
+    fields = data.model_dump(exclude={"items"})
+    obj = models.Quote(
+        user_id=user_id,
+        quote_no=_next_quote_no(db, user_id, data.issue_date.year),
+        **fields,
+    )
+    for i, item in enumerate(data.items):
+        obj.items.append(models.QuoteItem(sort=i, **item.model_dump()))
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def update_quote(
+    db: Session, user_id: int, quote_id: int, data: schemas.QuoteUpdate
+) -> models.Quote | None:
+    obj = get_quote(db, user_id, quote_id)
+    if obj is None:
+        return None
+    # ヘッダを更新（見積番号 quote_no は採番済みなので変えない）
+    for key, value in data.model_dump(exclude={"items"}).items():
+        setattr(obj, key, value)
+    # 明細はまるごと入れ替える（delete-orphan で古い行は消える）
+    obj.items.clear()
+    for i, item in enumerate(data.items):
+        obj.items.append(models.QuoteItem(sort=i, **item.model_dump()))
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def delete_quote(db: Session, user_id: int, quote_id: int) -> bool:
+    obj = get_quote(db, user_id, quote_id)
+    if obj is None:
+        return False
+    db.delete(obj)
+    db.commit()
+    return True

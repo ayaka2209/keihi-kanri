@@ -11,10 +11,15 @@ FastAPIはこの型を使って、
 import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+
+from . import quotes
 
 # 固定資産の償却区分
 DepreciationMethod = Literal["straight_line", "lump_sum_3y", "small_special"]
+
+# 消費税の扱い: exclusive(税抜・外税) / inclusive(税込・内税)
+TaxMode = Literal["exclusive", "inclusive"]
 
 
 # ---- 経費 -----------------------------------------------------------------
@@ -162,3 +167,104 @@ class DepreciationSummary(BaseModel):
     year: int
     total_business_amount: int  # その年の減価償却費（事業分）合計
     details: list[DepreciationDetail]
+
+
+# ---- 取引先（見積・請求の宛先マスタ） -------------------------------------
+class ClientBase(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    honorific: str = Field(default="御中", max_length=20)  # 様 / 御中
+    address: str = ""
+    contact: str = ""
+    memo: str = ""
+
+
+class ClientCreate(ClientBase):
+    """登録時に受け取る形（POST）。"""
+
+
+class ClientUpdate(ClientBase):
+    """更新時に受け取る形（PUT）。"""
+
+
+class ClientOut(ClientBase):
+    id: int
+    created_at: datetime.datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---- 見積書 ---------------------------------------------------------------
+class QuoteItemIn(BaseModel):
+    """見積明細の入力。"""
+
+    name: str = Field(min_length=1, max_length=200)
+    quantity: int = Field(default=1, ge=0)
+    unit: str = Field(default="", max_length=50)
+    unit_price: int = Field(default=0, ge=0)
+
+
+class QuoteItemOut(BaseModel):
+    id: int
+    name: str
+    quantity: int
+    unit: str
+    unit_price: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def amount(self) -> int:
+        """金額 = 単価 × 数量（保存せず都度計算）。"""
+        return self.unit_price * self.quantity
+
+
+class QuoteBase(BaseModel):
+    client_id: int | None = None
+    client_name: str = Field(min_length=1, max_length=200)  # 宛名
+    honorific: str = Field(default="御中", max_length=20)
+    subject: str = Field(default="", max_length=300)  # 件名
+    issue_date: datetime.date  # 発行日
+    valid_until: datetime.date | None = None  # 有効期限
+    tax_mode: TaxMode = "exclusive"
+    tax_rate: int = Field(default=10, ge=0, le=100)
+    notes: str = Field(default="", max_length=1000)
+
+
+class QuoteCreate(QuoteBase):
+    items: list[QuoteItemIn] = []
+
+
+class QuoteUpdate(QuoteCreate):
+    """更新時に受け取る形（PUT）。明細はまるごと入れ替える。"""
+
+
+class QuoteOut(QuoteBase):
+    id: int
+    quote_no: str
+    created_at: datetime.datetime
+    items: list[QuoteItemOut]
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def subtotal(self) -> int:
+        """税抜小計。"""
+        return self._totals()[0]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tax(self) -> int:
+        """消費税額。"""
+        return self._totals()[1]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total(self) -> int:
+        """合計（税込）。"""
+        return self._totals()[2]
+
+    def _totals(self) -> tuple[int, int, int]:
+        line_amounts = [it.unit_price * it.quantity for it in self.items]
+        return quotes.compute_totals(line_amounts, self.tax_mode, self.tax_rate)
