@@ -111,6 +111,24 @@ def test_quote_out_serializes_totals_from_orm(db):
     assert amounts["下層ページ"] == 150000
 
 
+def test_delete_client_keeps_referencing_quote(db):
+    """参照中の取引先を削除しても、見積は残り client_id だけ null になる。
+
+    宛名は client_name のスナップショットで保持されるので消えない（grasp-quotes）。
+    """
+    uid = _seed_user(db)
+    client = crud.create_client(db, uid, schemas.ClientCreate(name="株式会社サンプル"))
+    q = crud.create_quote(db, uid, _quote_payload(client_id=client.id))
+    assert q.client_id == client.id
+
+    # 取引先を削除してもエラーにならず、見積は残る
+    assert crud.delete_client(db, uid, client.id) is True
+    kept = crud.get_quote(db, uid, q.id)
+    assert kept is not None
+    assert kept.client_id is None
+    assert kept.client_name == "株式会社サンプル"  # 宛名スナップショットは保持
+
+
 def test_quote_is_scoped_to_user(db):
     uid = _seed_user(db)
     q = crud.create_quote(db, uid, _quote_payload())

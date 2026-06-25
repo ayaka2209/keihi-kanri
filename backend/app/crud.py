@@ -11,7 +11,7 @@ API層(main.py)は「何をしたいか」だけを呼び出し、
 
 import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from . import depreciation, models, schemas
@@ -459,6 +459,14 @@ def delete_client(db: Session, user_id: int, client_id: int) -> bool:
     )
     if obj is None:
         return False
+    # この取引先を参照している見積の client_id を外す（宛名は client_name の
+    # スナップショットで残るので見積自体は保持される）。これをせずに削除すると
+    # PostgreSQL では FK 違反で落ちる。
+    db.execute(
+        update(models.Quote)
+        .where(models.Quote.user_id == user_id, models.Quote.client_id == client_id)
+        .values(client_id=None)
+    )
     db.delete(obj)
     db.commit()
     return True
