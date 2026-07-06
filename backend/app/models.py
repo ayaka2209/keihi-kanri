@@ -144,6 +144,89 @@ class QuoteItem(Base):
     quote: Mapped["Quote"] = relationship(back_populates="items")
 
 
+class Setting(Base):
+    """事業者設定（発行元情報・振込先）。請求書に流し込む。ユーザーごとに1行。
+
+    見積・請求の発行元名や振込先口座は毎回同じなので、ここに一元管理して
+    発行時に流し込む（毎回入力しなくて済む）。"""
+
+    __tablename__ = "settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    business_name: Mapped[str] = mapped_column(String(200), default="")  # 発行者名・屋号
+    postal_code: Mapped[str] = mapped_column(String(20), default="")  # 郵便番号
+    address: Mapped[str] = mapped_column(String(300), default="")  # 住所
+    tel: Mapped[str] = mapped_column(String(50), default="")  # 電話
+    email: Mapped[str] = mapped_column(String(200), default="")  # メール
+    # 適格請求書発行事業者の登録番号（T＋13桁）。免税事業者は空でよい。
+    registration_no: Mapped[str] = mapped_column(String(20), default="")
+    bank_info: Mapped[str] = mapped_column(String(500), default="")  # 振込先（複数行可）
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user: Mapped["User"] = relationship()
+
+
+class Invoice(Base):
+    """請求書（ヘッダ）。見積(Quote)と対になる存在。宛名は発行時点の
+    スナップショット。見積から変換した場合は quote_id で辿れる。"""
+
+    __tablename__ = "invoices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    invoice_no: Mapped[str] = mapped_column(String(30), nullable=False)  # 例 INV-2026-001
+    # 変換元の見積への参照（任意）。見積を消しても請求書は残せるよう nullable。
+    quote_id: Mapped[int | None] = mapped_column(ForeignKey("quotes.id"), nullable=True, index=True)
+    # 取引先マスタへの参照（任意）。マスタを消しても請求書は残せるよう nullable。
+    client_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clients.id"), nullable=True, index=True
+    )
+    client_name: Mapped[str] = mapped_column(String(200), nullable=False)  # 宛名(スナップショット)
+    honorific: Mapped[str] = mapped_column(String(20), default="御中")
+    subject: Mapped[str] = mapped_column(String(300), default="")  # 件名
+    issue_date: Mapped[datetime.date] = mapped_column(Date, nullable=False, index=True)  # 発行日
+    due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)  # 支払期限
+    # exclusive(税抜・外税) / inclusive(税込・内税)
+    tax_mode: Mapped[str] = mapped_column(String(20), default="exclusive")
+    tax_rate: Mapped[int] = mapped_column(Integer, default=10)  # 消費税率(%)
+    notes: Mapped[str] = mapped_column(String(1000), default="")  # 備考
+    # 入金ステータス: unpaid(未入金) / paid(入金済み)。本格的な入金消込は将来。
+    status: Mapped[str] = mapped_column(
+        String(20), default="unpaid", server_default="unpaid", index=True
+    )
+    paid_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)  # 入金日
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user: Mapped["User"] = relationship()
+    # 請求書を消したら明細も消える（delete-orphan）。並びは sort 順。
+    items: Mapped[list["InvoiceItem"]] = relationship(
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+        order_by="InvoiceItem.sort",
+    )
+
+
+class InvoiceItem(Base):
+    """請求明細。invoices にぶら下がる1行。金額(=単価×数量)は保存せず都度計算する。"""
+
+    __tablename__ = "invoice_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id"), index=True)
+    sort: Mapped[int] = mapped_column(Integer, default=0)  # 表示順
+    name: Mapped[str] = mapped_column(String(200), nullable=False)  # 品名・項目
+    quantity: Mapped[int] = mapped_column(Integer, default=1)  # 数量
+    unit: Mapped[str] = mapped_column(String(50), default="")  # 単位(式・個・点 等)
+    unit_price: Mapped[int] = mapped_column(Integer, default=0)  # 単価(円)
+
+    invoice: Mapped["Invoice"] = relationship(back_populates="items")
+
+
 class Expense(Base):
     __tablename__ = "expenses"
 
