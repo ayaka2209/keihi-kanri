@@ -177,7 +177,9 @@ class Income(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     date: Mapped[datetime.date] = mapped_column(Date, nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False)  # 収入科目
-    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # 金額（円）
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # 金額（円・源泉徴収前の満額）
+    # 源泉徴収税額（円）。取引先が先に天引きした所得税。確定申告で前払い分として差し引く。
+    withholding: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     payer: Mapped[str] = mapped_column(String(200), default="")  # 取引先（支払元）
     memo: Mapped[str] = mapped_column(String(500), default="")  # 摘要
     created_at: Mapped[datetime.datetime] = mapped_column(

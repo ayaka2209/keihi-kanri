@@ -260,6 +260,7 @@ async function loadSummary() {
   $("#sum-count").textContent = s.count;
   $("#sum-income").textContent = yen(s.income_total);
   $("#sum-profit").textContent = yen(s.profit);
+  $("#sum-withholding").textContent = yen(s.withholding_total);
   $("#export-btn").href = "/api/export.csv?year=" + year;
 
   // 減価償却費の注記（科目別・年間合計には含むが、月別推移には含めない）
@@ -471,10 +472,13 @@ async function loadIncome() {
   rows.forEach((r) => {
     total += r.amount;
     const tr = document.createElement("tr");
+    const wh = r.withholding || 0;
     tr.innerHTML = `
       <td>${r.date}</td>
       <td>${r.category}</td>
       <td class="num">${yen(r.amount)}</td>
+      <td class="num">${wh ? yen(wh) : "—"}</td>
+      <td class="num">${yen(r.amount - wh)}</td>
       <td>${esc(r.payer)}</td>
       <td>${esc(r.memo)}</td>
       <td class="num">
@@ -501,6 +505,7 @@ $("#income-form").addEventListener("submit", async (e) => {
     date: $("#i-date").value,
     category: $("#i-category").value,
     amount: $("#i-amount").value,
+    withholding: $("#i-withholding").value || 0,
     payer: $("#i-payer").value.trim(),
     memo: $("#i-memo").value.trim(),
   };
@@ -524,6 +529,7 @@ $("#income-form").addEventListener("submit", async (e) => {
       showMsg("#income-msg", `登録しました（${yen(data.amount)}円）`);
       // 連続入力しやすいよう日付・科目は残し金額等のみクリア
       $("#i-amount").value = "";
+      $("#i-withholding").value = "";
       $("#i-payer").value = "";
       $("#i-memo").value = "";
       $("#i-amount").focus();
@@ -551,6 +557,7 @@ function startEditIncome(row) {
   $("#i-date").value = row.date;
   $("#i-category").value = row.category;
   $("#i-amount").value = row.amount;
+  $("#i-withholding").value = row.withholding || "";
   $("#i-payer").value = row.payer || "";
   $("#i-memo").value = row.memo || "";
   $("#income-form-title").textContent = `収入を編集（#${row.id}）`;

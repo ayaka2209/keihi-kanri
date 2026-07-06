@@ -186,6 +186,23 @@ def get_income_total(db: Session, user_id: int, year: int) -> int:
     return int(total or 0)
 
 
+def get_withholding_total(db: Session, user_id: int, year: int) -> int:
+    """その年に源泉徴収された所得税の合計（円）。確定申告で前払い分として差し引く。
+
+    func.extract は PostgreSQL 専用のため使わず、日付範囲で絞る
+    （SQLite でも動く＝ユニットテストできる。grasp-db / grasp-testing 参照）。
+    """
+    start = datetime.date(year, 1, 1)
+    end = datetime.date(year + 1, 1, 1)
+    total = db.scalar(
+        select(func.coalesce(func.sum(models.Income.withholding), 0))
+        .where(models.Income.user_id == user_id)
+        .where(models.Income.date >= start)
+        .where(models.Income.date < end)
+    )
+    return int(total or 0)
+
+
 # ---- 集計 -----------------------------------------------------------------
 def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
     y = int(year)
@@ -237,6 +254,8 @@ def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
 
     # 損益: 収入合計 − 経費合計(total。事業分＋減価償却を含む)
     income_total = get_income_total(db, user_id, y)
+    # 源泉徴収された所得税の合計（確定申告で前払い分として差し引く）。損益には影響しない。
+    withholding_total = get_withholding_total(db, user_id, y)
 
     return schemas.Summary(
         year=y,
@@ -247,6 +266,7 @@ def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
         depreciation_total=dep_total,
         income_total=income_total,
         profit=income_total - total,
+        withholding_total=withholding_total,
     )
 
 
