@@ -12,8 +12,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base
 from app import models  # noqa: F401  Base にテーブルを登録するためインポートする
+from app.database import Base
 
 
 @pytest.fixture
