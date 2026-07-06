@@ -21,6 +21,9 @@ DepreciationMethod = Literal["straight_line", "lump_sum_3y", "small_special"]
 # 消費税の扱い: exclusive(税抜・外税) / inclusive(税込・内税)
 TaxMode = Literal["exclusive", "inclusive"]
 
+# 請求書の入金ステータス: unpaid(未入金) / paid(入金済み)
+InvoiceStatus = Literal["unpaid", "paid"]
+
 
 # ---- 経費 -----------------------------------------------------------------
 class ExpenseBase(BaseModel):
@@ -254,6 +257,116 @@ class QuoteOut(QuoteBase):
     quote_no: str
     created_at: datetime.datetime
     items: list[QuoteItemOut]
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def subtotal(self) -> int:
+        """税抜小計。"""
+        return self._totals()[0]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tax(self) -> int:
+        """消費税額。"""
+        return self._totals()[1]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total(self) -> int:
+        """合計（税込）。"""
+        return self._totals()[2]
+
+    def _totals(self) -> tuple[int, int, int]:
+        line_amounts = [it.unit_price * it.quantity for it in self.items]
+        return quotes.compute_totals(line_amounts, self.tax_mode, self.tax_rate)
+
+
+# ---- 事業者設定（発行元情報・振込先） -------------------------------------
+class SettingBase(BaseModel):
+    business_name: str = Field(default="", max_length=200)  # 発行者名・屋号
+    postal_code: str = Field(default="", max_length=20)
+    address: str = Field(default="", max_length=300)
+    tel: str = Field(default="", max_length=50)
+    email: str = Field(default="", max_length=200)
+    registration_no: str = Field(default="", max_length=20)  # インボイス登録番号(T+13桁)
+    bank_info: str = Field(default="", max_length=500)  # 振込先（複数行可）
+
+
+class SettingUpdate(SettingBase):
+    """更新時に受け取る形（PUT）。"""
+
+
+class SettingOut(SettingBase):
+    id: int
+    created_at: datetime.datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---- 請求書 ---------------------------------------------------------------
+class InvoiceItemIn(BaseModel):
+    """請求明細の入力。"""
+
+    name: str = Field(min_length=1, max_length=200)
+    quantity: int = Field(default=1, ge=0)
+    unit: str = Field(default="", max_length=50)
+    unit_price: int = Field(default=0, ge=0)
+
+
+class InvoiceItemOut(BaseModel):
+    id: int
+    name: str
+    quantity: int
+    unit: str
+    unit_price: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def amount(self) -> int:
+        """金額 = 単価 × 数量（保存せず都度計算）。"""
+        return self.unit_price * self.quantity
+
+
+class InvoiceBase(BaseModel):
+    client_id: int | None = None
+    client_name: str = Field(min_length=1, max_length=200)  # 宛名
+    honorific: str = Field(default="御中", max_length=20)
+    subject: str = Field(default="", max_length=300)  # 件名
+    issue_date: datetime.date  # 発行日
+    due_date: datetime.date | None = None  # 支払期限
+    tax_mode: TaxMode = "exclusive"
+    tax_rate: int = Field(default=10, ge=0, le=100)
+    notes: str = Field(default="", max_length=1000)
+    status: InvoiceStatus = "unpaid"  # 入金ステータス
+    paid_date: datetime.date | None = None  # 入金日
+
+    @model_validator(mode="after")
+    def _paid_date_requires_paid(self) -> "InvoiceBase":
+        # 入金日を入れたのに未入金のままは矛盾。入金日があれば入金済み扱いにする。
+        if self.paid_date is not None:
+            self.status = "paid"
+        return self
+
+
+class InvoiceCreate(InvoiceBase):
+    quote_id: int | None = None  # 変換元の見積（任意）
+    items: list[InvoiceItemIn] = []
+
+
+class InvoiceUpdate(InvoiceCreate):
+    """更新時に受け取る形（PUT）。明細はまるごと入れ替える。"""
+
+
+class InvoiceOut(InvoiceBase):
+    id: int
+    invoice_no: str
+    quote_id: int | None
+    created_at: datetime.datetime
+    items: list[InvoiceItemOut]
 
     model_config = ConfigDict(from_attributes=True)
 

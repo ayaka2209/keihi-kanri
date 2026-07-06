@@ -479,12 +479,17 @@ def delete_client(db: Session, user_id: int, client_id: int) -> bool:
     )
     if obj is None:
         return False
-    # この取引先を参照している見積の client_id を外す（宛名は client_name の
-    # スナップショットで残るので見積自体は保持される）。これをせずに削除すると
+    # この取引先を参照している見積・請求書の client_id を外す（宛名は client_name の
+    # スナップショットで残るので見積・請求書自体は保持される）。これをせずに削除すると
     # PostgreSQL では FK 違反で落ちる。
     db.execute(
         update(models.Quote)
         .where(models.Quote.user_id == user_id, models.Quote.client_id == client_id)
+        .values(client_id=None)
+    )
+    db.execute(
+        update(models.Invoice)
+        .where(models.Invoice.user_id == user_id, models.Invoice.client_id == client_id)
         .values(client_id=None)
     )
     db.delete(obj)
@@ -565,6 +570,161 @@ def delete_quote(db: Session, user_id: int, quote_id: int) -> bool:
     obj = get_quote(db, user_id, quote_id)
     if obj is None:
         return False
+    # この見積から変換した請求書の quote_id を外す（請求書自体は残す）。
+    # これをせずに削除すると PostgreSQL では FK 違反で落ちる。
+    db.execute(
+        update(models.Invoice)
+        .where(models.Invoice.user_id == user_id, models.Invoice.quote_id == quote_id)
+        .values(quote_id=None)
+    )
     db.delete(obj)
     db.commit()
     return True
+
+
+# ---- 事業者設定（発行元情報・振込先） -------------------------------------
+def get_settings(db: Session, user_id: int) -> models.Setting:
+    """発行元設定を返す。無ければ空の1行を作って返す（ユーザーごとに1行）。"""
+    obj = db.scalar(select(models.Setting).where(models.Setting.user_id == user_id))
+    if obj is None:
+        obj = models.Setting(user_id=user_id)
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+    return obj
+
+
+def update_settings(db: Session, user_id: int, data: schemas.SettingUpdate) -> models.Setting:
+    obj = get_settings(db, user_id)
+    for key, value in data.model_dump().items():
+        setattr(obj, key, value)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+# ---- 請求書 ---------------------------------------------------------------
+def _next_invoice_no(db: Session, user_id: int, year: int) -> str:
+    """その年の請求書番号を「INV-YYYY-連番(3桁)」で採番する。
+
+    見積(_next_quote_no)と同じ思想。接頭辞 INV- で見積と区別する。
+    func.extract を避けるため文字列の前方一致(LIKE)で当年分を絞る（SQLite でも動く）。
+    """
+    prefix = f"INV-{year}-"
+    nos = db.scalars(
+        select(models.Invoice.invoice_no)
+        .where(models.Invoice.user_id == user_id)
+        .where(models.Invoice.invoice_no.like(f"{prefix}%"))
+    ).all()
+    max_n = 0
+    for no in nos:
+        tail = no[len(prefix) :]
+        if tail.isdigit():
+            max_n = max(max_n, int(tail))
+    return f"{prefix}{max_n + 1:03d}"
+
+
+def list_invoices(db: Session, user_id: int) -> list[models.Invoice]:
+    stmt = (
+        select(models.Invoice)
+        .where(models.Invoice.user_id == user_id)
+        .order_by(models.Invoice.issue_date.desc(), models.Invoice.id.desc())
+    )
+    return list(db.scalars(stmt).all())
+
+
+def get_invoice(db: Session, user_id: int, invoice_id: int) -> models.Invoice | None:
+    return db.scalar(
+        select(models.Invoice).where(
+            models.Invoice.id == invoice_id, models.Invoice.user_id == user_id
+        )
+    )
+
+
+def create_invoice(db: Session, user_id: int, data: schemas.InvoiceCreate) -> models.Invoice:
+    fields = data.model_dump(exclude={"items"})
+    obj = models.Invoice(
+        user_id=user_id,
+        invoice_no=_next_invoice_no(db, user_id, data.issue_date.year),
+        **fields,
+    )
+    for i, item in enumerate(data.items):
+        obj.items.append(models.InvoiceItem(sort=i, **item.model_dump()))
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def update_invoice(
+    db: Session, user_id: int, invoice_id: int, data: schemas.InvoiceUpdate
+) -> models.Invoice | None:
+    obj = get_invoice(db, user_id, invoice_id)
+    if obj is None:
+        return None
+    # ヘッダを更新（請求書番号 invoice_no は採番済みなので変えない）
+    for key, value in data.model_dump(exclude={"items"}).items():
+        setattr(obj, key, value)
+    # 明細はまるごと入れ替える（delete-orphan で古い行は消える）
+    obj.items.clear()
+    for i, item in enumerate(data.items):
+        obj.items.append(models.InvoiceItem(sort=i, **item.model_dump()))
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def delete_invoice(db: Session, user_id: int, invoice_id: int) -> bool:
+    obj = get_invoice(db, user_id, invoice_id)
+    if obj is None:
+        return False
+    db.delete(obj)
+    db.commit()
+    return True
+
+
+def create_invoice_from_quote(
+    db: Session,
+    user_id: int,
+    quote_id: int,
+    issue_date: datetime.date | None = None,
+    due_date: datetime.date | None = None,
+) -> models.Invoice | None:
+    """見積の内容をそのまま転記した請求書を新規作成する（見積は残す）。
+
+    宛名・件名・税区分・備考・明細を引き継ぎ、変換元を quote_id で辿れるようにする。
+    発行日は既定で今日、請求書番号は独自採番、入金ステータスは未入金で作る。
+    """
+    quote = get_quote(db, user_id, quote_id)
+    if quote is None:
+        return None
+    issue = issue_date or datetime.date.today()
+    obj = models.Invoice(
+        user_id=user_id,
+        invoice_no=_next_invoice_no(db, user_id, issue.year),
+        quote_id=quote.id,
+        client_id=quote.client_id,
+        client_name=quote.client_name,
+        honorific=quote.honorific,
+        subject=quote.subject,
+        issue_date=issue,
+        due_date=due_date,
+        tax_mode=quote.tax_mode,
+        tax_rate=quote.tax_rate,
+        notes=quote.notes,
+        status="unpaid",
+    )
+    for item in sorted(quote.items, key=lambda x: x.sort):
+        obj.items.append(
+            models.InvoiceItem(
+                sort=item.sort,
+                name=item.name,
+                quantity=item.quantity,
+                unit=item.unit,
+                unit_price=item.unit_price,
+            )
+        )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj

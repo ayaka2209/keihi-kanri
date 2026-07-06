@@ -206,6 +206,40 @@ td .row-btn {
 
 .empty { text-align: center; color: var(--muted); padding: 30px; }
 
+/* 入金ステータスのバッジ（請求書一覧） */
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge.unpaid { background: #fef2f2; color: var(--danger); border: 1px solid #f3c4c4; }
+.badge.paid { background: #ecfdf5; color: var(--green); border: 1px solid #a7f3d0; }
+
+/* 発行元・振込先の設定（請求書タブの折りたたみ） */
+#settings-box {
+  margin-bottom: 20px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: #fafafa;
+}
+#settings-box summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+#settings-box[open] summary { margin-bottom: 12px; }
+#settings-box textarea {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+/* 印刷: 発行元情報のブロック */
+.quote-doc-issuer { margin-top: 10px; font-size: 12px; line-height: 1.7; }
+
 /* カード */
 .cards { display: flex; gap: 16px; margin: 16px 0; }
 .card {
@@ -278,40 +312,183 @@ td .row-btn {
 @media print {
   body.printing header,
   body.printing main { display: none !important; }
-  body.printing #print-area { display: block; }
-  @page { margin: 16mm; }
+  /* 余白は #print-area の padding で作る。@page の margin を 0 にすることで
+     ブラウザが自動で付けるヘッダー/フッター（ページタイトル・日付・URL・ページ番号）を消す。
+     margin が 0 以外だと「経費管理（青色申告）」等のタイトルが印刷に出てしまう。 */
+  body.printing #print-area { display: block; padding: 16mm; }
+  @page { margin: 0; }
 }
 
-.quote-doc { color: #000; font-size: 13px; }
+/* 参考PDF準拠：温かみのあるテラコッタ／ベージュ配色の帳票デザイン。
+   見積書・請求書で共通のクラスを使う（printQuote / printInvoice → buildDocHtml）。 */
+.quote-doc {
+  --doc-accent: #c2896e;       /* テラコッタ（バナー・アクセント） */
+  --doc-accent-dark: #b3785c;  /* 濃いテラコッタ（件名・◆等） */
+  --doc-band: #efe6dd;         /* セクション見出しのベージュ */
+  --doc-band-soft: #f7f1ec;    /* 小計行などの淡いベージュ */
+  --doc-line: #e2d5c9;         /* 細い罫線 */
+  --doc-ink: #40382f;          /* 本文 */
+  --doc-heading: #4d3c30;      /* 見出し（濃い茶） */
+  --doc-muted: #8a7d70;        /* 補助テキスト */
+  color: var(--doc-ink);
+  font-size: 13px;
+  line-height: 1.6;
+}
 .quote-doc-title {
   text-align: center;
-  font-size: 26px;
-  letter-spacing: 0.3em;
-  margin: 0 0 28px;
-  border-bottom: 3px double #000;
-  padding-bottom: 8px;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  padding-left: 0.4em;         /* letter-spacing の右余りを補正して中央に見せる */
+  color: var(--doc-heading);
+  margin: 0 0 6px;
 }
-.quote-doc-head { display: flex; justify-content: space-between; gap: 24px; }
-.quote-doc-to .to-name { font-size: 18px; font-weight: 700; border-bottom: 1px solid #000; padding-bottom: 4px; }
-.quote-doc-to .to-name span { font-size: 14px; font-weight: 400; }
-.quote-doc-to .to-subject { margin-top: 10px; font-size: 14px; }
-.quote-doc-meta { text-align: right; font-size: 13px; line-height: 1.8; }
-.quote-doc-grandtotal {
-  margin: 24px 0;
-  font-size: 16px;
-  border: 2px solid #000;
-  padding: 10px 14px;
+.quote-doc-subtitle {
+  text-align: center;
+  color: var(--doc-accent-dark);
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 26px;
+}
+.quote-doc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  margin-bottom: 22px;
+}
+.quote-doc-to .to-name {
   display: inline-block;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--doc-heading);
+  border-bottom: 2px solid var(--doc-accent);
+  padding-bottom: 6px;
 }
-.quote-doc-grandtotal strong { font-size: 22px; }
-.quote-doc-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-.quote-doc-table th, .quote-doc-table td {
-  border: 1px solid #000;
-  padding: 8px 10px;
+.quote-doc-to .to-name span { font-size: 14px; font-weight: 400; }
+.quote-doc-to .to-intro { margin-top: 12px; font-size: 13px; color: var(--doc-muted); }
+.quote-doc-meta { text-align: right; font-size: 12px; min-width: 230px; }
+.quote-doc-meta .meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--doc-muted);
+  line-height: 1.9;
+}
+.quote-doc-meta .meta-row strong { color: var(--doc-ink); font-weight: 600; }
+.doc-issuer { margin-top: 14px; text-align: left; font-size: 12px; line-height: 1.7; }
+.doc-issuer-label { color: var(--doc-muted); }
+.doc-issuer-name { font-size: 15px; font-weight: 700; color: var(--doc-heading); }
+
+/* 合計バナー */
+.quote-doc-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--doc-accent);
+  color: #fff;
+  border-radius: 4px;
+  padding: 18px 26px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.quote-doc-banner .banner-label { font-size: 15px; font-weight: 600; letter-spacing: 0.04em; }
+.quote-doc-banner .banner-amount { font-size: 30px; font-weight: 700; }
+
+/* 支払期限 / 有効期限 */
+.quote-doc-term {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 12px;
+  margin: 14px 0 24px;
   font-size: 13px;
+}
+.quote-doc-term-spacer { height: 24px; }
+.quote-doc-term .term-label { color: var(--doc-muted); }
+.quote-doc-term .term-value {
+  min-width: 150px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--doc-line);
+  font-weight: 600;
+}
+
+/* セクション見出し */
+.quote-doc-section {
+  background: var(--doc-band);
+  border-left: 5px solid var(--doc-accent);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--doc-heading);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* 明細テーブル */
+.quote-doc-table { width: 100%; border-collapse: collapse; }
+.quote-doc-table thead th {
+  border-bottom: 1.5px solid var(--doc-line);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--doc-muted);
+  text-align: left;
+  white-space: nowrap;
+}
+.quote-doc-table tbody td {
+  border-bottom: 1px solid var(--doc-line);
+  padding: 10px;
+  font-size: 13px;
+  vertical-align: top;
   white-space: normal;
 }
-.quote-doc-table th { background: #eee; text-align: left; }
-.quote-doc-table tfoot td { font-weight: 600; }
-.quote-doc-table tfoot tr.grand td { font-size: 16px; background: #f3f3f3; }
-.quote-doc-notes { margin-top: 20px; font-size: 13px; white-space: pre-wrap; }
+.quote-doc-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.quote-doc-table .muted { color: var(--doc-muted); font-weight: 400; }
+.quote-doc-table tfoot td { padding: 10px; font-weight: 700; color: var(--doc-heading); }
+.quote-doc-table tfoot tr.subtotal-row td {
+  background: var(--doc-band-soft);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* 総額行（テーブル下） */
+.quote-doc-grandline {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 40px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 2px solid var(--doc-ink);
+}
+.quote-doc-grandline .g-label { font-size: 16px; font-weight: 700; color: var(--doc-heading); }
+.quote-doc-grandline .g-amount {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--doc-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 振込先ボックス */
+.quote-doc-bank {
+  margin-top: 28px;
+  border: 1px solid var(--doc-line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.quote-doc-bank-head {
+  background: var(--doc-band);
+  padding: 8px 14px;
+  font-weight: 700;
+  color: var(--doc-heading);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.quote-doc-bank-body { padding: 14px 16px; font-size: 13px; white-space: pre-wrap; }
+
+/* 備考 */
+.quote-doc-notes-title { margin: 26px 0 8px; font-weight: 700; color: var(--doc-heading); }
+.quote-doc-notes-title::before { content: "■ "; color: var(--doc-accent); }
+.quote-doc-notes { margin: 0; padding-left: 1.3em; font-size: 12.5px; }
+.quote-doc-notes li { margin-bottom: 4px; }

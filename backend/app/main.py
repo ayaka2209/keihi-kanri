@@ -458,6 +458,91 @@ def remove_quote(
     return {"deleted": quote_id}
 
 
+# ---- 事業者設定（発行元情報・振込先） -------------------------------------
+@app.get("/api/settings", response_model=schemas.SettingOut)
+def get_settings(
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.get_settings(db, uid)
+
+
+@app.put("/api/settings", response_model=schemas.SettingOut)
+def put_settings(
+    data: schemas.SettingUpdate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.update_settings(db, uid, data)
+
+
+# ---- 請求書 ---------------------------------------------------------------
+@app.get("/api/invoices", response_model=list[schemas.InvoiceOut])
+def get_invoices(
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.list_invoices(db, uid)
+
+
+@app.get("/api/invoices/{invoice_id}", response_model=schemas.InvoiceOut)
+def fetch_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    obj = crud.get_invoice(db, uid, invoice_id)
+    if obj is None:
+        raise HTTPException(404, "対象の請求書が見つかりません")
+    return obj
+
+
+@app.post("/api/invoices", response_model=schemas.InvoiceOut)
+def post_invoice(
+    data: schemas.InvoiceCreate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.create_invoice(db, uid, data)
+
+
+@app.post("/api/quotes/{quote_id}/invoice", response_model=schemas.InvoiceOut)
+def convert_quote_to_invoice(
+    quote_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    """見積を請求書に変換する（見積の内容を転記した請求書を新規作成）。"""
+    obj = crud.create_invoice_from_quote(db, uid, quote_id)
+    if obj is None:
+        raise HTTPException(404, "変換元の見積書が見つかりません")
+    return obj
+
+
+@app.put("/api/invoices/{invoice_id}", response_model=schemas.InvoiceOut)
+def put_invoice(
+    invoice_id: int,
+    data: schemas.InvoiceUpdate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    obj = crud.update_invoice(db, uid, invoice_id, data)
+    if obj is None:
+        raise HTTPException(404, "対象の請求書が見つかりません")
+    return obj
+
+
+@app.delete("/api/invoices/{invoice_id}")
+def remove_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    if not crud.delete_invoice(db, uid, invoice_id):
+        raise HTTPException(404, "対象の請求書が見つかりません")
+    return {"deleted": invoice_id}
+
+
 # ---- フロントエンド（静的ファイル） ---------------------------------------
 # 注意: API のルートをすべて定義した「後」にマウントすること。
 # こうしないと "/" がすべてのリクエストを横取りしてしまう。
