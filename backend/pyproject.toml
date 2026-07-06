@@ -11,3 +11,8 @@ extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+# FastAPI の `Depends()` は引数デフォルトで呼ぶのが定石。B008 の対象から外す。
+# （可変デフォルト `[]`/`{}` 等を拾う B008 自体は有効なまま残す）
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends"]
