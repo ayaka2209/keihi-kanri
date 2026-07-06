@@ -108,8 +108,8 @@ def test_income_withholding_is_stored(db):
     assert updated.withholding == 1000
 
 
-def test_withholding_total_sums_business_year(db):
-    """get_withholding_total はその年の源泉徴収税額の合計を返す。"""
+def test_income_totals_sums_business_year(db):
+    """get_income_totals はその年の (収入合計, 源泉徴収税額合計) を1回で返す。"""
     user = _make_user(db)
     crud.create_income(
         db,
@@ -125,14 +125,24 @@ def test_withholding_total_sums_business_year(db):
             date=datetime.date(2026, 6, 10), category="売上", amount=110000, withholding=10210
         ),
     )
-    # 源泉なしの1件は合計に影響しない。
+    # 源泉なしの1件は源泉合計には影響しないが、収入合計には入る。
     crud.create_income(
         db,
         user.id,
         schemas.IncomeCreate(date=datetime.date(2026, 7, 1), category="雑収入", amount=5000),
     )
+    # 別の年(2025)は当年集計に含めない（日付範囲の下端・上端を検証）。
+    crud.create_income(
+        db,
+        user.id,
+        schemas.IncomeCreate(
+            date=datetime.date(2025, 12, 31), category="売上", amount=99999, withholding=9999
+        ),
+    )
 
-    assert crud.get_withholding_total(db, user.id, 2026) == 2042 + 10210
+    income_total, withholding_total = crud.get_income_totals(db, user.id, 2026)
+    assert income_total == 22000 + 110000 + 5000
+    assert withholding_total == 2042 + 10210
 
 
 def test_withholding_cannot_exceed_amount():

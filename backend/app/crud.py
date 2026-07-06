@@ -176,31 +176,28 @@ def delete_income(db: Session, user_id: int, income_id: int) -> bool:
     return True
 
 
-def get_income_total(db: Session, user_id: int, year: int) -> int:
-    """その年の収入合計（円）。"""
-    total = db.scalar(
-        select(func.coalesce(func.sum(models.Income.amount), 0))
-        .where(models.Income.user_id == user_id)
-        .where(func.extract("year", models.Income.date) == year)
-    )
-    return int(total or 0)
+def get_income_totals(db: Session, user_id: int, year: int) -> tuple[int, int]:
+    """その年の (収入合計, 源泉徴収税額合計)（円）を1クエリで返す。
 
-
-def get_withholding_total(db: Session, user_id: int, year: int) -> int:
-    """その年に源泉徴収された所得税の合計（円）。確定申告で前払い分として差し引く。
+    - 収入合計: 源泉徴収前の満額の合計。
+    - 源泉徴収税額合計: 取引先が先に天引きした所得税。確定申告で前払い分として差し引く。
 
     func.extract は PostgreSQL 専用のため使わず、日付範囲で絞る
     （SQLite でも動く＝ユニットテストできる。grasp-db / grasp-testing 参照）。
+    2つの合計は同じ行走査で足りるため1回の SELECT でまとめて取得する。
     """
     start = datetime.date(year, 1, 1)
     end = datetime.date(year + 1, 1, 1)
-    total = db.scalar(
-        select(func.coalesce(func.sum(models.Income.withholding), 0))
+    income, withholding = db.execute(
+        select(
+            func.coalesce(func.sum(models.Income.amount), 0),
+            func.coalesce(func.sum(models.Income.withholding), 0),
+        )
         .where(models.Income.user_id == user_id)
         .where(models.Income.date >= start)
         .where(models.Income.date < end)
-    )
-    return int(total or 0)
+    ).one()
+    return int(income or 0), int(withholding or 0)
 
 
 # ---- 集計 -----------------------------------------------------------------
@@ -252,10 +249,9 @@ def get_summary(db: Session, user_id: int, year: str) -> schemas.Summary:
             )
         by_category.sort(key=lambda c: c.total, reverse=True)
 
-    # 損益: 収入合計 − 経費合計(total。事業分＋減価償却を含む)
-    income_total = get_income_total(db, user_id, y)
-    # 源泉徴収された所得税の合計（確定申告で前払い分として差し引く）。損益には影響しない。
-    withholding_total = get_withholding_total(db, user_id, y)
+    # 損益: 収入合計 − 経費合計(total。事業分＋減価償却を含む)。
+    # 収入合計と源泉徴収税額合計(損益には影響しない前払い所得税)は1クエリでまとめて取得する。
+    income_total, withholding_total = get_income_totals(db, user_id, y)
 
     return schemas.Summary(
         year=y,
