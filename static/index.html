@@ -103,6 +103,9 @@
           <label>金額（円）<span class="req">*</span>
             <input type="number" id="i-amount" min="0" step="1" required placeholder="例: 300000" />
           </label>
+          <label>源泉徴収税額（円）
+            <input type="number" id="i-withholding" min="0" step="1" placeholder="例: 30630（無ければ空欄）" />
+          </label>
           <label>取引先（支払元）
             <input type="text" id="i-payer" placeholder="例: 株式会社○○" list="payer-list" />
             <datalist id="payer-list"></datalist>
@@ -117,7 +120,7 @@
           <span id="income-msg" class="msg"></span>
         </div>
       </form>
-      <p class="hint">売上や雑収入などを記録します。「集計・確定申告」タブで年間収入と損益（収入−経費）を確認できます。</p>
+      <p class="hint">売上や雑収入などを記録します。金額は源泉徴収される前の満額を入れ、天引きされた所得税は「源泉徴収税額」に入れます。「集計・確定申告」タブで年間収入・損益（収入−経費）・源泉徴収税額の合計を確認できます。</p>
 
       <h3>収入一覧</h3>
       <div class="filters">
@@ -131,6 +134,7 @@
           <thead>
             <tr>
               <th>日付</th><th>収入科目</th><th class="num">金額</th>
+              <th class="num">源泉徴収</th><th class="num">差引入金</th>
               <th>取引先</th><th>摘要</th><th></th>
             </tr>
           </thead>
@@ -161,6 +165,11 @@
         <div class="card big">
           <div class="card-label">損益（収入 − 経費）</div>
           <div class="card-value"><span id="sum-profit">0</span> 円</div>
+        </div>
+        <div class="card">
+          <div class="card-label">源泉徴収税額（前払い所得税）</div>
+          <div class="card-value"><span id="sum-withholding">0</span> 円</div>
+          <div class="card-sub">確定申告で差し引く／還付の対象</div>
         </div>
       </div>
 

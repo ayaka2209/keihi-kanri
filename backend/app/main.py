@@ -303,9 +303,19 @@ def export_incomes_csv(
     rows = crud.list_incomes(db, uid, year=year)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["日付", "収入科目", "金額", "取引先", "摘要"])
+    writer.writerow(["日付", "収入科目", "金額", "源泉徴収税額", "差引入金額", "取引先", "摘要"])
     for r in sorted(rows, key=lambda x: x.date):
-        writer.writerow([r.date.isoformat(), r.category, r.amount, r.payer, r.memo])
+        writer.writerow(
+            [
+                r.date.isoformat(),
+                r.category,
+                r.amount,
+                r.withholding,
+                r.amount - r.withholding,  # 実際に振り込まれた額
+                r.payer,
+                r.memo,
+            ]
+        )
     # Excelで文字化けしないようBOM付きUTF-8
     body = ("﻿" + buf.getvalue()).encode("utf-8")
     return Response(

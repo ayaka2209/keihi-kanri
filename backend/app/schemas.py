@@ -76,6 +76,8 @@ class Summary(BaseModel):
     # 損益: 収入合計と、収入−経費(total)の差引
     income_total: int = 0
     profit: int = 0
+    # 源泉徴収税額の年間合計（前払いした所得税）。確定申告で差し引く額の目安。
+    withholding_total: int = 0
 
 
 # ---- 勘定科目 -------------------------------------------------------------
@@ -87,9 +89,17 @@ class CategoryCreate(BaseModel):
 class IncomeBase(BaseModel):
     date: datetime.date
     category: str = Field(min_length=1, max_length=100)
-    amount: int = Field(ge=0)
+    amount: int = Field(ge=0)  # 源泉徴収前の満額
+    withholding: int = Field(default=0, ge=0)  # 源泉徴収税額（円）。無ければ0
     payer: str = ""  # 取引先（支払元）
     memo: str = ""
+
+    @model_validator(mode="after")
+    def _withholding_within_amount(self) -> "IncomeBase":
+        # 源泉徴収税額が満額を超えるのは入力ミス。差引入金額が負になるのを防ぐ。
+        if self.withholding > self.amount:
+            raise ValueError("源泉徴収税額は金額（満額）を超えられません")
+        return self
 
 
 class IncomeCreate(IncomeBase):
