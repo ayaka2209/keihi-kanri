@@ -41,6 +41,7 @@ $$(".tab").forEach((btn) => {
     if (btn.dataset.tab === "income") loadIncome();
     if (btn.dataset.tab === "summary") loadSummary();
     if (btn.dataset.tab === "assets") loadAssets();
+    if (btn.dataset.tab === "quotes") loadQuotes();
   });
 });
 
@@ -569,6 +570,290 @@ async function removeIncome(row) {
   $("#" + id).addEventListener("change", loadIncome)
 );
 $("#income-filter-keyword").addEventListener("input", debounce(loadIncome, 250));
+
+// ---- 見積書 ---------------------------------------------------------------
+let CLIENTS = [];
+const TAX_MODE_LABELS = { exclusive: "税抜", inclusive: "税込" };
+
+// バックエンドの quotes.compute_totals と必ず揃える（円未満切り捨て）
+function quoteTotals(lineAmounts, taxMode, taxRate) {
+  const gross = lineAmounts.reduce((a, b) => a + b, 0);
+  if (taxMode === "inclusive") {
+    const subtotal = Math.floor((gross * 100) / (100 + taxRate));
+    return { subtotal, tax: gross - subtotal, total: gross };
+  }
+  const tax = Math.floor((gross * taxRate) / 100);
+  return { subtotal: gross, tax, total: gross + tax };
+}
+
+async function loadQuotes() {
+  // 取引先マスタと既定値（発行日＝今日）を用意
+  CLIENTS = await api("/api/clients");
+  fillClientSelect();
+  if (!$("#q-issue-date").value) $("#q-issue-date").value = META.today;
+  if ($("#quote-item-table tbody").children.length === 0) addItemRow();
+  recalcQuote();
+
+  const rows = await api("/api/quotes");
+  const tbody = $("#quote-table tbody");
+  tbody.innerHTML = "";
+  rows.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${esc(r.quote_no)}</td>
+      <td>${r.issue_date}</td>
+      <td>${esc(r.client_name)} ${esc(r.honorific)}</td>
+      <td>${esc(r.subject)}</td>
+      <td class="num">${yen(r.total)}</td>
+      <td class="num">
+        <button class="row-btn print">印刷</button>
+        <button class="row-btn edit">編集</button>
+        <button class="row-btn del">削除</button>
+      </td>`;
+    tr.querySelector(".print").addEventListener("click", () => printQuote(r));
+    tr.querySelector(".edit").addEventListener("click", () => startEditQuote(r));
+    tr.querySelector(".del").addEventListener("click", () => removeQuote(r));
+    tbody.appendChild(tr);
+  });
+  $("#quote-empty").hidden = rows.length > 0;
+}
+
+function fillClientSelect() {
+  $("#q-client").innerHTML =
+    '<option value="">（直接入力）</option>' +
+    CLIENTS.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+}
+
+// 取引先マスタを選んだら宛名・敬称を流し込む
+$("#q-client").addEventListener("change", () => {
+  const c = CLIENTS.find((x) => String(x.id) === $("#q-client").value);
+  if (c) {
+    $("#q-client-name").value = c.name;
+    $("#q-honorific").value = c.honorific || "御中";
+  }
+});
+
+// ---- 明細の行 -------------------------------------------------------------
+function addItemRow(item) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="text" class="qi-name" placeholder="例: トップページ制作" /></td>
+    <td class="num"><input type="number" class="qi-qty num" min="0" step="1" value="1" /></td>
+    <td><input type="text" class="qi-unit" placeholder="式" /></td>
+    <td class="num"><input type="number" class="qi-price num" min="0" step="1" value="0" /></td>
+    <td class="num qi-amount">0</td>
+    <td class="num"><button type="button" class="row-btn del">削除</button></td>`;
+  if (item) {
+    tr.querySelector(".qi-name").value = item.name || "";
+    tr.querySelector(".qi-qty").value = item.quantity ?? 1;
+    tr.querySelector(".qi-unit").value = item.unit || "";
+    tr.querySelector(".qi-price").value = item.unit_price ?? 0;
+  }
+  tr.querySelectorAll("input").forEach((inp) =>
+    inp.addEventListener("input", recalcQuote)
+  );
+  tr.querySelector(".del").addEventListener("click", () => {
+    tr.remove();
+    if ($("#quote-item-table tbody").children.length === 0) addItemRow();
+    recalcQuote();
+  });
+  $("#quote-item-table tbody").appendChild(tr);
+}
+
+$("#q-add-item").addEventListener("click", () => addItemRow());
+$("#q-tax-mode").addEventListener("change", recalcQuote);
+$("#q-tax-rate").addEventListener("input", recalcQuote);
+
+function collectItems() {
+  return [...$$("#quote-item-table tbody tr")]
+    .map((tr) => ({
+      name: tr.querySelector(".qi-name").value.trim(),
+      quantity: Number(tr.querySelector(".qi-qty").value || 0),
+      unit: tr.querySelector(".qi-unit").value.trim(),
+      unit_price: Number(tr.querySelector(".qi-price").value || 0),
+    }))
+    .filter((it) => it.name !== "");
+}
+
+function recalcQuote() {
+  const rows = [...$$("#quote-item-table tbody tr")];
+  const lineAmounts = [];
+  rows.forEach((tr) => {
+    const qty = Number(tr.querySelector(".qi-qty").value || 0);
+    const price = Number(tr.querySelector(".qi-price").value || 0);
+    const amount = qty * price;
+    tr.querySelector(".qi-amount").textContent = yen(amount);
+    if (tr.querySelector(".qi-name").value.trim() !== "") lineAmounts.push(amount);
+  });
+  const t = quoteTotals(lineAmounts, $("#q-tax-mode").value, Number($("#q-tax-rate").value || 0));
+  $("#q-subtotal").textContent = yen(t.subtotal);
+  $("#q-tax").textContent = yen(t.tax);
+  $("#q-total").textContent = yen(t.total);
+}
+
+// ---- 保存・編集・削除 -----------------------------------------------------
+$("#quote-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = $("#quote-edit-id").value;
+  const items = collectItems();
+  if (items.length === 0) {
+    showMsg("#quote-msg", "明細を1行以上入力してください", true);
+    return;
+  }
+  const data = {
+    client_id: $("#q-client").value ? Number($("#q-client").value) : null,
+    client_name: $("#q-client-name").value.trim(),
+    honorific: $("#q-honorific").value,
+    subject: $("#q-subject").value.trim(),
+    issue_date: $("#q-issue-date").value,
+    valid_until: $("#q-valid-until").value || null,
+    tax_mode: $("#q-tax-mode").value,
+    tax_rate: Number($("#q-tax-rate").value || 0),
+    notes: $("#q-notes").value.trim(),
+    items,
+  };
+  if (!data.client_name || !data.issue_date) return;
+
+  try {
+    if (id) {
+      await api(`/api/quotes/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      showMsg("#quote-msg", "更新しました");
+    } else {
+      const created = await api("/api/quotes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      showMsg("#quote-msg", `保存しました（${created.quote_no}）`);
+    }
+    resetQuoteForm();
+    loadQuotes();
+  } catch (err) {
+    showMsg("#quote-msg", err.message, true);
+  }
+});
+
+$("#quote-cancel-edit").addEventListener("click", resetQuoteForm);
+
+function resetQuoteForm() {
+  $("#quote-edit-id").value = "";
+  $("#quote-form").reset();
+  $("#q-issue-date").value = META.today;
+  $("#q-tax-rate").value = "10";
+  $("#quote-item-table tbody").innerHTML = "";
+  addItemRow();
+  recalcQuote();
+  $("#quote-form-title").textContent = "見積書を作成";
+  $("#quote-submit-btn").textContent = "この内容で保存する";
+  $("#quote-cancel-edit").hidden = true;
+}
+
+function startEditQuote(row) {
+  $("#quote-edit-id").value = row.id;
+  $("#q-client").value = row.client_id ? String(row.client_id) : "";
+  $("#q-client-name").value = row.client_name || "";
+  $("#q-honorific").value = row.honorific || "御中";
+  $("#q-subject").value = row.subject || "";
+  $("#q-issue-date").value = row.issue_date;
+  $("#q-valid-until").value = row.valid_until || "";
+  $("#q-tax-mode").value = row.tax_mode || "exclusive";
+  $("#q-tax-rate").value = row.tax_rate ?? 10;
+  $("#q-notes").value = row.notes || "";
+  $("#quote-item-table tbody").innerHTML = "";
+  (row.items || []).forEach((it) => addItemRow(it));
+  if ((row.items || []).length === 0) addItemRow();
+  recalcQuote();
+  $("#quote-form-title").textContent = `見積書を編集（${row.quote_no}）`;
+  $("#quote-submit-btn").textContent = "更新する";
+  $("#quote-cancel-edit").hidden = false;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function removeQuote(row) {
+  if (!confirm(`この見積書を削除しますか？\n${row.quote_no} ${row.client_name}様 ${yen(row.total)}円`))
+    return;
+  await api(`/api/quotes/${row.id}`, { method: "DELETE" });
+  loadQuotes();
+}
+
+// この宛先を取引先マスタに保存（次回から選んで使える）
+$("#q-save-client").addEventListener("click", async () => {
+  const name = $("#q-client-name").value.trim();
+  if (!name) {
+    showMsg("#quote-msg", "宛名を入力してから保存してください", true);
+    return;
+  }
+  try {
+    await api("/api/clients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, honorific: $("#q-honorific").value }),
+    });
+    CLIENTS = await api("/api/clients");
+    fillClientSelect();
+    const saved = CLIENTS.find((c) => c.name === name);
+    if (saved) $("#q-client").value = String(saved.id);
+    showMsg("#quote-msg", `「${name}」を取引先に保存しました`);
+  } catch (err) {
+    showMsg("#quote-msg", err.message, true);
+  }
+});
+
+// ---- 印刷（ブラウザのPDF保存を使う） --------------------------------------
+function printQuote(q) {
+  const itemsHtml = (q.items || [])
+    .map(
+      (it) => `<tr>
+        <td>${esc(it.name)}</td>
+        <td class="num">${yen(it.quantity)}</td>
+        <td>${esc(it.unit)}</td>
+        <td class="num">${yen(it.unit_price)}</td>
+        <td class="num">${yen(it.amount)}</td>
+      </tr>`
+    )
+    .join("");
+  const taxLabel = TAX_MODE_LABELS[q.tax_mode] || "";
+  $("#print-area").innerHTML = `
+    <div class="quote-doc">
+      <h1 class="quote-doc-title">御 見 積 書</h1>
+      <div class="quote-doc-head">
+        <div class="quote-doc-to">
+          <div class="to-name">${esc(q.client_name)} <span>${esc(q.honorific)}</span></div>
+          ${q.subject ? `<div class="to-subject">件名：${esc(q.subject)}</div>` : ""}
+        </div>
+        <div class="quote-doc-meta">
+          <div>見積番号：${esc(q.quote_no)}</div>
+          <div>発行日：${q.issue_date}</div>
+          ${q.valid_until ? `<div>有効期限：${q.valid_until}</div>` : ""}
+        </div>
+      </div>
+      <div class="quote-doc-grandtotal">お見積金額　<strong>¥${yen(q.total)}</strong>（${taxLabel}）</div>
+      <table class="quote-doc-table">
+        <thead>
+          <tr><th>品名・項目</th><th class="num">数量</th><th>単位</th><th class="num">単価</th><th class="num">金額</th></tr>
+        </thead>
+        <tbody>${itemsHtml}</tbody>
+        <tfoot>
+          <tr><td colspan="4" class="num">小計（税抜）</td><td class="num">${yen(q.subtotal)}</td></tr>
+          <tr><td colspan="4" class="num">消費税（${q.tax_rate}%）</td><td class="num">${yen(q.tax)}</td></tr>
+          <tr class="grand"><td colspan="4" class="num">合計</td><td class="num">¥${yen(q.total)}</td></tr>
+        </tfoot>
+      </table>
+      ${q.notes ? `<div class="quote-doc-notes">備考：${esc(q.notes)}</div>` : ""}
+    </div>`;
+  document.body.classList.add("printing");
+  window.print();
+}
+
+// 印刷終了後は画面を元に戻す
+window.addEventListener("afterprint", () => {
+  document.body.classList.remove("printing");
+  $("#print-area").innerHTML = "";
+});
 
 // ---- 起動 -----------------------------------------------------------------
 init();

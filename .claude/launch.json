@@ -6,6 +6,13 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["legacy/app.py"],
       "port": 8765
+    },
+    {
+      "name": "keihi-v2-preview",
+      "runtimeExecutable": "/Users/ayaka/keihi-kanri/.venv/bin/uvicorn",
+      "runtimeArgs": ["app.main:app", "--app-dir", "backend", "--port", "8766"],
+      "port": 8766,
+      "autoPort": false
     }
   ]
 }

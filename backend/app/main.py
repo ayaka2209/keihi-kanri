@@ -352,6 +352,102 @@ def export_csv(
     )
 
 
+# ---- 取引先（見積・請求の宛先マスタ） -------------------------------------
+@app.get("/api/clients", response_model=list[schemas.ClientOut])
+def get_clients(
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.list_clients(db, uid)
+
+
+@app.post("/api/clients", response_model=schemas.ClientOut)
+def post_client(
+    data: schemas.ClientCreate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.create_client(db, uid, data)
+
+
+@app.put("/api/clients/{client_id}", response_model=schemas.ClientOut)
+def put_client(
+    client_id: int,
+    data: schemas.ClientUpdate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    obj = crud.update_client(db, uid, client_id, data)
+    if obj is None:
+        raise HTTPException(404, "対象の取引先が見つかりません")
+    return obj
+
+
+@app.delete("/api/clients/{client_id}")
+def remove_client(
+    client_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    if not crud.delete_client(db, uid, client_id):
+        raise HTTPException(404, "対象の取引先が見つかりません")
+    return {"deleted": client_id}
+
+
+# ---- 見積書 ---------------------------------------------------------------
+@app.get("/api/quotes", response_model=list[schemas.QuoteOut])
+def get_quotes(
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.list_quotes(db, uid)
+
+
+@app.get("/api/quotes/{quote_id}", response_model=schemas.QuoteOut)
+def fetch_quote(
+    quote_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    obj = crud.get_quote(db, uid, quote_id)
+    if obj is None:
+        raise HTTPException(404, "対象の見積書が見つかりません")
+    return obj
+
+
+@app.post("/api/quotes", response_model=schemas.QuoteOut)
+def post_quote(
+    data: schemas.QuoteCreate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    return crud.create_quote(db, uid, data)
+
+
+@app.put("/api/quotes/{quote_id}", response_model=schemas.QuoteOut)
+def put_quote(
+    quote_id: int,
+    data: schemas.QuoteUpdate,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    obj = crud.update_quote(db, uid, quote_id, data)
+    if obj is None:
+        raise HTTPException(404, "対象の見積書が見つかりません")
+    return obj
+
+
+@app.delete("/api/quotes/{quote_id}")
+def remove_quote(
+    quote_id: int,
+    db: Session = Depends(get_db),
+    uid: int = Depends(current_user_id),
+):
+    if not crud.delete_quote(db, uid, quote_id):
+        raise HTTPException(404, "対象の見積書が見つかりません")
+    return {"deleted": quote_id}
+
+
 # ---- フロントエンド（静的ファイル） ---------------------------------------
 # 注意: API のルートをすべて定義した「後」にマウントすること。
 # こうしないと "/" がすべてのリクエストを横取りしてしまう。

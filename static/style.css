@@ -246,7 +246,72 @@ td .row-btn {
 .inline-form { display: flex; gap: 10px; align-items: center; padding: 16px; }
 .inline-form input { flex: 1 1 auto; }
 
+/* 見積書: 明細入力テーブル内の input は枠を細めに */
+#quote-item-table input { width: 100%; padding: 6px 8px; font-size: 14px; }
+#quote-item-table .qi-qty, #quote-item-table .qi-price { text-align: right; }
+#quote-item-table td { white-space: normal; }
+.qi-amount { font-variant-numeric: tabular-nums; }
+
+/* 見積書: 合計エリア */
+.quote-totals {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.quote-totals strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.quote-totals .big { font-size: 18px; color: var(--ink); margin-top: 4px; }
+.quote-totals .big strong { font-size: 22px; }
+
 @media (max-width: 600px) {
   .grid { grid-template-columns: 1fr; }
   main { padding: 16px; }
 }
+
+/* ---- 印刷専用の見積書 ---------------------------------------------------- */
+/* 画面では隠し、印刷時のみ #print-area を表示して他を全部隠す */
+#print-area { display: none; }
+
+@media print {
+  body.printing header,
+  body.printing main { display: none !important; }
+  body.printing #print-area { display: block; }
+  @page { margin: 16mm; }
+}
+
+.quote-doc { color: #000; font-size: 13px; }
+.quote-doc-title {
+  text-align: center;
+  font-size: 26px;
+  letter-spacing: 0.3em;
+  margin: 0 0 28px;
+  border-bottom: 3px double #000;
+  padding-bottom: 8px;
+}
+.quote-doc-head { display: flex; justify-content: space-between; gap: 24px; }
+.quote-doc-to .to-name { font-size: 18px; font-weight: 700; border-bottom: 1px solid #000; padding-bottom: 4px; }
+.quote-doc-to .to-name span { font-size: 14px; font-weight: 400; }
+.quote-doc-to .to-subject { margin-top: 10px; font-size: 14px; }
+.quote-doc-meta { text-align: right; font-size: 13px; line-height: 1.8; }
+.quote-doc-grandtotal {
+  margin: 24px 0;
+  font-size: 16px;
+  border: 2px solid #000;
+  padding: 10px 14px;
+  display: inline-block;
+}
+.quote-doc-grandtotal strong { font-size: 22px; }
+.quote-doc-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.quote-doc-table th, .quote-doc-table td {
+  border: 1px solid #000;
+  padding: 8px 10px;
+  font-size: 13px;
+  white-space: normal;
+}
+.quote-doc-table th { background: #eee; text-align: left; }
+.quote-doc-table tfoot td { font-weight: 600; }
+.quote-doc-table tfoot tr.grand td { font-size: 16px; background: #f3f3f3; }
+.quote-doc-notes { margin-top: 20px; font-size: 13px; white-space: pre-wrap; }
